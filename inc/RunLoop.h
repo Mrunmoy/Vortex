@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <cstdint>
 #include <functional>
 #include <mutex>
 #include <vector>
@@ -20,6 +21,14 @@ namespace ms
     class RunLoop
     {
     public:
+        struct Version
+        {
+            static constexpr uint8_t major = 1;
+            static constexpr uint8_t minor = 0;
+            static constexpr uint8_t patch = 0;
+            static constexpr uint32_t packed = (major << 16) | (minor << 8) | patch;
+        };
+
         RunLoop();
         ~RunLoop();
 
