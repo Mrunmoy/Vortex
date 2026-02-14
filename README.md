@@ -4,6 +4,8 @@
 
 Epoll-based event loop for C++17 with thread-safe callable posting.
 
+> **Guided walkthrough** — [WalkthroughRunLoop.md](WalkthroughRunLoop.md) walks through every line of the implementation.
+
 ## Features
 
 - **Pure event loop** — runs on a dedicated thread, no transport knowledge
@@ -84,11 +86,13 @@ ms-runloop/
 │   └── vendor/googletest/     # Google Test (submodule)
 ├── example/
 │   ├── CMakeLists.txt
-│   └── basic_usage.cpp        # API demo
+│   ├── basic_usage.cpp        # API demo
+│   └── event_notifier.cpp     # Multi-component event bus
 ├── .github/workflows/
 │   └── ci.yml                 # GCC + Clang CI
 ├── CMakeLists.txt
 ├── build.py
+├── WalkthroughRunLoop.md      # Implementation walkthrough
 ├── LICENSE
 └── README.md
 ```
