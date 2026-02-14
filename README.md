@@ -10,10 +10,11 @@ Epoll-based event loop for C++17 with thread-safe callable posting.
 
 - **Pure event loop** — runs on a dedicated thread, no transport knowledge
 - **Thread-safe posting** — `executeOnRunLoop()` queues work from any thread
+- **fd source watching** — `addSource()` / `removeSource()` for readability events via epoll
 - **FIFO ordering** — posted callables execute in submission order
 - **Restartable** — `run()` can be called again after `stop()`
 - **Deterministic shutdown** — `stop()` always terminates `run()`
-- **9 unit tests** covering lifecycle, threading, ordering, and restart
+- **14 unit tests** covering lifecycle, threading, ordering, fd sources, and restart
 
 ## Dependencies
 
@@ -38,6 +39,11 @@ std::thread t([&] { loop.run(); });
 // Post work from any thread
 loop.executeOnRunLoop([] {
     // runs on the loop thread
+});
+
+// Watch a file descriptor for readability
+loop.addSource(fd, [&] {
+    // called on the loop thread when fd is readable
 });
 
 loop.stop();
@@ -82,7 +88,7 @@ ms-runloop/
 │   └── RunLoop.cpp            # Implementation (epoll + pipe wakeup)
 ├── test/
 │   ├── CMakeLists.txt
-│   ├── RunLoopTest.cpp        # 9 unit tests
+│   ├── RunLoopTest.cpp        # 14 unit tests
 │   └── vendor/googletest/     # Google Test (submodule)
 ├── example/
 │   ├── CMakeLists.txt

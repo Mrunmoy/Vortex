@@ -38,7 +38,9 @@ def clean():
 def configure(examples=False):
     os.makedirs(BUILD_DIR, exist_ok=True)
     cmd = [
-        "cmake", "-B", BUILD_DIR,
+        "cmake",
+        "-B",
+        BUILD_DIR,
         "-DCMAKE_BUILD_TYPE=Release",
     ]
     if examples:
@@ -47,24 +49,18 @@ def configure(examples=False):
 
 
 def build():
-    run(["cmake", "--build", BUILD_DIR,
-         "-j{}".format(os.cpu_count() or 1)],
-        cwd=SCRIPT_DIR)
+    run(["cmake", "--build", BUILD_DIR, "-j{}".format(os.cpu_count() or 1)], cwd=SCRIPT_DIR)
 
 
 def test():
-    run(["ctest", "--test-dir", BUILD_DIR, "--output-on-failure"],
-        cwd=SCRIPT_DIR)
+    run(["ctest", "--test-dir", BUILD_DIR, "--output-on-failure"], cwd=SCRIPT_DIR)
 
 
 def main():
     parser = argparse.ArgumentParser(description="Build ms-runloop")
-    parser.add_argument("-c", "--clean", action="store_true",
-                        help="Clean build directory")
-    parser.add_argument("-t", "--test", action="store_true",
-                        help="Build and run tests")
-    parser.add_argument("-e", "--examples", action="store_true",
-                        help="Build examples")
+    parser.add_argument("-c", "--clean", action="store_true", help="Clean build directory")
+    parser.add_argument("-t", "--test", action="store_true", help="Build and run tests")
+    parser.add_argument("-e", "--examples", action="store_true", help="Build examples")
     args = parser.parse_args()
 
     if args.clean:

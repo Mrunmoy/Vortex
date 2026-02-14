@@ -36,15 +36,14 @@ public:
 class AlertManager
 {
 public:
-    explicit AlertManager(double threshold)
-        : m_threshold(threshold) {}
+    explicit AlertManager(double threshold) : m_threshold(threshold) {}
 
     void onSensorEvent(const SensorEvent &event)
     {
         if (event.value > m_threshold)
         {
-            std::printf("[Alert]  %s exceeded threshold (%.1f > %.1f)\n",
-                        event.sensorName.c_str(), event.value, m_threshold);
+            std::printf("[Alert]  %s exceeded threshold (%.1f > %.1f)\n", event.sensorName.c_str(),
+                        event.value, m_threshold);
         }
     }
 
@@ -59,15 +58,14 @@ class SensorMonitor
 public:
     using Callback = std::function<void(const SensorEvent &)>;
 
-    SensorMonitor(ms::RunLoop &loop)
-        : m_loop(loop) {}
+    SensorMonitor(ms::RunLoop &loop) : m_loop(loop) {}
 
     // Thread-safe: the actual mutation happens on the loop thread,
     // so it never races with notify().
     void addListener(Callback cb)
     {
-        m_loop.executeOnRunLoop([this, cb = std::move(cb)]() mutable
-                                { m_listeners.push_back(std::move(cb)); });
+        m_loop.executeOnRunLoop(
+            [this, cb = std::move(cb)]() mutable { m_listeners.push_back(std::move(cb)); });
     }
 
     // Simulate sensor readings from a background thread
@@ -80,11 +78,9 @@ public:
         };
 
         Reading readings[] = {
-            {"temperature", 22.5},
-            {"pressure", 1013.0},
-            {"temperature", 85.3}, // will trigger alert
-            {"humidity", 45.0},
-            {"pressure", 1050.7}, // will trigger alert
+            {"temperature", 22.5}, {"pressure", 1013.0},
+            {"temperature", 85.3},                       // will trigger alert
+            {"humidity", 45.0},    {"pressure", 1050.7}, // will trigger alert
         };
 
         for (const auto &r : readings)
@@ -92,13 +88,11 @@ public:
             SensorEvent event{r.name, r.value};
 
             // Post notification to the run loop thread
-            m_loop.executeOnRunLoop([this, event]
-                                   { notify(event); });
+            m_loop.executeOnRunLoop([this, event] { notify(event); });
         }
 
         // Stop the loop after all events are delivered
-        m_loop.executeOnRunLoop([this]
-                                { m_loop.stop(); });
+        m_loop.executeOnRunLoop([this] { m_loop.stop(); });
     }
 
 private:
@@ -125,14 +119,11 @@ int main()
     AlertManager alerts(80.0);
 
     SensorMonitor monitor(loop);
-    monitor.addListener([&](const SensorEvent &e)
-                        { logger.onSensorEvent(e); });
-    monitor.addListener([&](const SensorEvent &e)
-                        { alerts.onSensorEvent(e); });
+    monitor.addListener([&](const SensorEvent &e) { logger.onSensorEvent(e); });
+    monitor.addListener([&](const SensorEvent &e) { alerts.onSensorEvent(e); });
 
     // Run the loop on a background thread
-    std::thread loopThread([&]
-                           { loop.run(); });
+    std::thread loopThread([&] { loop.run(); });
 
     // Simulate sensor readings from the main thread
     monitor.simulateReadings();

@@ -34,7 +34,9 @@ namespace ms
 
         if (pipe2(m_wakeupFd, O_CLOEXEC | O_NONBLOCK) == 0)
         {
-            struct epoll_event ev{};
+            struct epoll_event ev
+            {
+            };
             ev.events = EPOLLIN;
             ev.data.fd = m_wakeupFd[0];
             epoll_ctl(m_epollFd, EPOLL_CTL_ADD, m_wakeupFd[0], &ev);
@@ -70,8 +72,22 @@ namespace ms
                 if (events[i].data.fd == m_wakeupFd[0])
                 {
                     char buf[64];
-                    while (read(m_wakeupFd[0], buf, sizeof(buf)) > 0)
+                    while (read(m_wakeupFd[0], buf, sizeof(buf)) > 0) {}
+                }
+                else
+                {
+                    std::function<void()> handler;
                     {
+                        std::lock_guard<std::mutex> lock(m_sourcesMutex);
+                        auto it = m_sources.find(events[i].data.fd);
+                        if (it != m_sources.end())
+                        {
+                            handler = it->second;
+                        }
+                    }
+                    if (handler)
+                    {
+                        handler();
                     }
                 }
             }
@@ -94,6 +110,29 @@ namespace ms
             m_postQueue.push_back(std::move(fn));
         }
         wakeup();
+    }
+
+    void RunLoop::addSource(int fd, std::function<void()> handler)
+    {
+        {
+            std::lock_guard<std::mutex> lock(m_sourcesMutex);
+            m_sources[fd] = std::move(handler);
+        }
+
+        struct epoll_event ev
+        {
+        };
+        ev.events = EPOLLIN;
+        ev.data.fd = fd;
+        epoll_ctl(m_epollFd, EPOLL_CTL_ADD, fd, &ev);
+    }
+
+    void RunLoop::removeSource(int fd)
+    {
+        epoll_ctl(m_epollFd, EPOLL_CTL_DEL, fd, nullptr);
+
+        std::lock_guard<std::mutex> lock(m_sourcesMutex);
+        m_sources.erase(fd);
     }
 
     void RunLoop::wakeup()

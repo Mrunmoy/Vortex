@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <functional>
 #include <mutex>
+#include <unordered_map>
 #include <vector>
 
 namespace ms
@@ -50,6 +51,14 @@ namespace ms
         // Thread-safe — can be called from any thread.
         void executeOnRunLoop(std::function<void()> fn);
 
+        // Watch a file descriptor for readability. When data is available,
+        // `handler` is called on the run loop thread.
+        // Thread-safe — can be called from any thread.
+        void addSource(int fd, std::function<void()> handler);
+
+        // Stop watching a file descriptor. Thread-safe.
+        void removeSource(int fd);
+
         bool isRunning() const { return m_running.load(std::memory_order_acquire); }
         const char *name() const { return m_name; }
 
@@ -65,6 +74,9 @@ namespace ms
 
         std::mutex m_postMutex;
         std::vector<std::function<void()>> m_postQueue;
+
+        std::mutex m_sourcesMutex;
+        std::unordered_map<int, std::function<void()>> m_sources;
     };
 
 } // namespace ms
