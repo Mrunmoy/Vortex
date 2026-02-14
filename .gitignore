@@ -1,0 +1,61 @@
+# Build directories
+build/
+cmake-build-*/
+out/
+
+# Compiled objects
+*.o
+*.obj
+*.lo
+*.slo
+
+# Static and shared libraries
+*.a
+*.lib
+*.so
+*.so.*
+*.dylib
+*.dll
+
+# Executables
+*.exe
+*.out
+
+# Precompiled headers
+*.gch
+*.pch
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CTestTestfile.cmake
+CPackConfig.cmake
+CPackSourceConfig.cmake
+_deps/
+compile_commands.json
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Claude
+.claude/
+
+# clangd / ccls
+.cache/
+.ccls-cache/
+
+# Coverage
+*.gcno
+*.gcda
+*.gcov
+lcov.info
+coverage/
+
+# Valgrind
+vgcore.*
