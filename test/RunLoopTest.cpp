@@ -471,8 +471,55 @@ TEST(RunLoopTest, RemoveSourceFromHandler)
 }
 
 // ═════════════════════════════════════════════════════════════════════
-// addSource() from a different thread while loop is running.
+// addSource() called twice with the same fd replaces the handler.
 // ═════════════════════════════════════════════════════════════════════
+
+TEST(RunLoopTest, UpdateSourceHandler)
+{
+    RunLoop loop;
+    loop.init("UpdateSource");
+
+    auto [readFd, writeFd] = makePipe();
+
+    std::atomic<int> handler1Count{0};
+    std::atomic<int> handler2Count{0};
+
+    loop.addSource(readFd, [&] {
+        drainPipe(readFd);
+        handler1Count.fetch_add(1);
+    });
+
+    RunLoopGuard guard(loop);
+    std::this_thread::sleep_for(10ms);
+
+    // Trigger with the first handler.
+    writeByte(writeFd);
+
+    for (int i = 0; i < 200 && handler1Count.load() < 1; ++i)
+        std::this_thread::sleep_for(5ms);
+
+    EXPECT_EQ(handler1Count.load(), 1);
+    EXPECT_EQ(handler2Count.load(), 0);
+
+    // Replace the handler — must not fail or leave epoll in a broken state.
+    loop.addSource(readFd, [&] {
+        drainPipe(readFd);
+        handler2Count.fetch_add(1);
+    });
+
+    // Trigger with the second handler.
+    writeByte(writeFd);
+
+    for (int i = 0; i < 200 && handler2Count.load() < 1; ++i)
+        std::this_thread::sleep_for(5ms);
+
+    EXPECT_EQ(handler2Count.load(), 1);
+    EXPECT_EQ(handler1Count.load(), 1); // first handler must not have fired again
+
+    loop.removeSource(readFd);
+    close(readFd);
+    close(writeFd);
+}
 
 TEST(RunLoopTest, AddSourceFromAnyThread)
 {

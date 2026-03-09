@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <functional>
 #include <mutex>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -60,12 +61,12 @@ namespace ms
         void removeSource(int fd);
 
         bool isRunning() const { return m_running.load(std::memory_order_acquire); }
-        const char *name() const { return m_name; }
+        const char *name() const { return m_name.c_str(); }
 
     private:
         void wakeup();
 
-        const char *m_name = "";
+        std::string m_name;
         int m_epollFd = -1;
         int m_wakeupFd[2] = {-1, -1};
 

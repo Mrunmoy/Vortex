@@ -1,6 +1,8 @@
 #include "RunLoop.h"
 
+#include <cerrno>
 #include <fcntl.h>
+#include <system_error>
 #include <unistd.h>
 #include <sys/epoll.h>
 
@@ -31,15 +33,34 @@ namespace ms
     {
         m_name = name;
         m_epollFd = epoll_create1(EPOLL_CLOEXEC);
-
-        if (pipe2(m_wakeupFd, O_CLOEXEC | O_NONBLOCK) == 0)
+        if (m_epollFd < 0)
         {
-            struct epoll_event ev
-            {
-            };
-            ev.events = EPOLLIN;
-            ev.data.fd = m_wakeupFd[0];
-            epoll_ctl(m_epollFd, EPOLL_CTL_ADD, m_wakeupFd[0], &ev);
+            throw std::system_error(errno, std::generic_category(),
+                                    "RunLoop::init: epoll_create1 failed");
+        }
+
+        if (pipe2(m_wakeupFd, O_CLOEXEC | O_NONBLOCK) != 0)
+        {
+            close(m_epollFd);
+            m_epollFd = -1;
+            throw std::system_error(errno, std::generic_category(),
+                                    "RunLoop::init: pipe2 failed");
+        }
+
+        struct epoll_event ev
+        {
+        };
+        ev.events = EPOLLIN;
+        ev.data.fd = m_wakeupFd[0];
+        if (epoll_ctl(m_epollFd, EPOLL_CTL_ADD, m_wakeupFd[0], &ev) != 0)
+        {
+            close(m_wakeupFd[0]);
+            close(m_wakeupFd[1]);
+            m_wakeupFd[0] = m_wakeupFd[1] = -1;
+            close(m_epollFd);
+            m_epollFd = -1;
+            throw std::system_error(errno, std::generic_category(),
+                                    "RunLoop::init: epoll_ctl failed");
         }
     }
 
@@ -66,6 +87,12 @@ namespace ms
             }
 
             int n = epoll_wait(m_epollFd, events, MAX_EVENTS, -1);
+            if (n < 0)
+            {
+                if (errno == EINTR)
+                    continue;
+                break;
+            }
 
             for (int i = 0; i < n; ++i)
             {
@@ -114,25 +141,57 @@ namespace ms
 
     void RunLoop::addSource(int fd, std::function<void()> handler)
     {
-        {
-            std::lock_guard<std::mutex> lock(m_sourcesMutex);
-            m_sources[fd] = std::move(handler);
-        }
-
         struct epoll_event ev
         {
         };
         ev.events = EPOLLIN;
         ev.data.fd = fd;
-        epoll_ctl(m_epollFd, EPOLL_CTL_ADD, fd, &ev);
+
+        std::lock_guard<std::mutex> lock(m_sourcesMutex);
+        auto it = m_sources.find(fd);
+        bool alreadyWatched = (it != m_sources.end());
+
+        // Save the previous handler so we can roll back on failure.
+        std::function<void()> previous;
+        if (alreadyWatched)
+            previous = std::move(it->second);
+
+        m_sources[fd] = std::move(handler);
+        int op = alreadyWatched ? EPOLL_CTL_MOD : EPOLL_CTL_ADD;
+        if (epoll_ctl(m_epollFd, op, fd, &ev) != 0)
+        {
+            if (alreadyWatched)
+                m_sources[fd] = std::move(previous);
+            else
+                m_sources.erase(fd);
+            throw std::system_error(errno, std::generic_category(),
+                                    "RunLoop::addSource: epoll_ctl failed");
+        }
     }
 
     void RunLoop::removeSource(int fd)
     {
-        epoll_ctl(m_epollFd, EPOLL_CTL_DEL, fd, nullptr);
-
         std::lock_guard<std::mutex> lock(m_sourcesMutex);
-        m_sources.erase(fd);
+        auto it = m_sources.find(fd);
+        if (it == m_sources.end())
+            return;
+
+        // Save the handler so we can roll back if epoll_ctl fails unexpectedly.
+        std::function<void()> saved = std::move(it->second);
+        m_sources.erase(it);
+
+        if (epoll_ctl(m_epollFd, EPOLL_CTL_DEL, fd, nullptr) != 0)
+        {
+            // ENOENT: fd was not registered in epoll (e.g., it was already
+            // closed and auto-removed by the kernel). EBADF: fd is closed.
+            // Both are benign — the descriptor is no longer monitored either way.
+            if (errno != ENOENT && errno != EBADF)
+            {
+                m_sources[fd] = std::move(saved);
+                throw std::system_error(errno, std::generic_category(),
+                                        "RunLoop::removeSource: epoll_ctl failed");
+            }
+        }
     }
 
     void RunLoop::wakeup()
