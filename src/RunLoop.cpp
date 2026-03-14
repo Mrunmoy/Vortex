@@ -68,61 +68,76 @@ namespace ms
     {
         m_running.store(true, std::memory_order_release);
 
-        constexpr int MAX_EVENTS = 32;
-        struct epoll_event events[MAX_EVENTS];
-
-        while (!m_stopRequested.load(std::memory_order_acquire))
+        // Ensure flags are reset on all exit paths (normal exit, exceptions
+        // from handlers, or epoll_wait failures).
+        auto resetFlags = [this]()
         {
-            // Execute posted callables
-            {
-                std::vector<std::function<void()>> batch;
-                {
-                    std::lock_guard<std::mutex> lock(m_postMutex);
-                    batch.swap(m_postQueue);
-                }
-                for (auto &fn : batch)
-                {
-                    fn();
-                }
-            }
+            m_running.store(false, std::memory_order_release);
+            m_stopRequested.store(false, std::memory_order_release);
+        };
 
-            int n = epoll_wait(m_epollFd, events, MAX_EVENTS, -1);
-            if (n < 0)
-            {
-                if (errno == EINTR)
-                    continue;
-                throw std::system_error(errno, std::generic_category(),
-                                        "RunLoop::run: epoll_wait failed");
-            }
+        try
+        {
+            constexpr int MAX_EVENTS = 32;
+            struct epoll_event events[MAX_EVENTS];
 
-            for (int i = 0; i < n; ++i)
+            while (!m_stopRequested.load(std::memory_order_acquire))
             {
-                if (events[i].data.fd == m_wakeupFd[0])
+                // Execute posted callables
                 {
-                    char buf[64];
-                    while (read(m_wakeupFd[0], buf, sizeof(buf)) > 0) {}
-                }
-                else
-                {
-                    std::function<void()> handler;
+                    std::vector<std::function<void()>> batch;
                     {
-                        std::lock_guard<std::mutex> lock(m_sourcesMutex);
-                        auto it = m_sources.find(events[i].data.fd);
-                        if (it != m_sources.end())
-                        {
-                            handler = it->second;
-                        }
+                        std::lock_guard<std::mutex> lock(m_postMutex);
+                        batch.swap(m_postQueue);
                     }
-                    if (handler)
+                    for (auto &fn : batch)
                     {
-                        handler();
+                        fn();
+                    }
+                }
+
+                int n = epoll_wait(m_epollFd, events, MAX_EVENTS, -1);
+                if (n < 0)
+                {
+                    if (errno == EINTR)
+                        continue;
+                    throw std::system_error(errno, std::generic_category(),
+                                            "RunLoop::run: epoll_wait failed");
+                }
+
+                for (int i = 0; i < n; ++i)
+                {
+                    if (events[i].data.fd == m_wakeupFd[0])
+                    {
+                        char buf[64];
+                        while (read(m_wakeupFd[0], buf, sizeof(buf)) > 0) {}
+                    }
+                    else
+                    {
+                        std::function<void()> handler;
+                        {
+                            std::lock_guard<std::mutex> lock(m_sourcesMutex);
+                            auto it = m_sources.find(events[i].data.fd);
+                            if (it != m_sources.end())
+                            {
+                                handler = it->second;
+                            }
+                        }
+                        if (handler)
+                        {
+                            handler();
+                        }
                     }
                 }
             }
         }
+        catch (...)
+        {
+            resetFlags();
+            throw;
+        }
 
-        m_running.store(false, std::memory_order_release);
-        m_stopRequested.store(false, std::memory_order_release);
+        resetFlags();
     }
 
     void RunLoop::stop()
