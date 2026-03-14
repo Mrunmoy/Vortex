@@ -31,7 +31,7 @@ namespace ms
 
     void RunLoop::init(const char *name)
     {
-        m_name = name;
+        m_name = name ? name : "";
         m_epollFd = epoll_create1(EPOLL_CLOEXEC);
         if (m_epollFd < 0)
         {
@@ -160,11 +160,24 @@ namespace ms
         int op = alreadyWatched ? EPOLL_CTL_MOD : EPOLL_CTL_ADD;
         if (epoll_ctl(m_epollFd, op, fd, &ev) != 0)
         {
+            // If the fd was believed to be watched but epoll reports ENOENT,
+            // it was likely auto-removed (e.g. after being closed). In that
+            // case, retry with EPOLL_CTL_ADD to resynchronize our state.
+            if (alreadyWatched && errno == ENOENT)
+            {
+                op = EPOLL_CTL_ADD;
+                if (epoll_ctl(m_epollFd, op, fd, &ev) == 0)
+                {
+                    return;
+                }
+            }
+
+            int savedErrno = errno;
             if (alreadyWatched)
                 m_sources[fd] = std::move(previous);
             else
                 m_sources.erase(fd);
-            throw std::system_error(errno, std::generic_category(),
+            throw std::system_error(savedErrno, std::generic_category(),
                                     "RunLoop::addSource: epoll_ctl failed");
         }
     }
