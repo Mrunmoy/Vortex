@@ -39,11 +39,13 @@ namespace ms
 
         // Initialize the run loop. `name` identifies this loop
         // for debugging/logging purposes.
-        // Throws std::system_error on failure (epoll/pipe creation).
+        // Throws std::system_error on failure (epoll/pipe setup).
         void init(const char *name);
 
         // Block the calling thread, dispatching events until stop() is called.
-        // Throws std::system_error on epoll_wait failure.
+        // Throws std::system_error on epoll_wait failure. Also propagates
+        // any exceptions thrown by posted callables or fd handlers.
+        // Flags are reset on all exit paths (the loop is restartable).
         void run();
 
         // Signal the run loop to exit. Thread-safe, callable from any thread
