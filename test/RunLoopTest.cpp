@@ -521,6 +521,10 @@ TEST(RunLoopTest, UpdateSourceHandler)
     close(writeFd);
 }
 
+// ═════════════════════════════════════════════════════════════════════
+// addSource() from a non-loop thread works correctly.
+// ═════════════════════════════════════════════════════════════════════
+
 TEST(RunLoopTest, AddSourceFromAnyThread)
 {
     RunLoop loop;

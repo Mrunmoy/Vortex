@@ -200,8 +200,9 @@ namespace ms
             // Both are benign — the descriptor is no longer monitored either way.
             if (errno != ENOENT && errno != EBADF)
             {
+                int savedErrno = errno;
                 m_sources[fd] = std::move(saved);
-                throw std::system_error(errno, std::generic_category(),
+                throw std::system_error(savedErrno, std::generic_category(),
                                         "RunLoop::removeSource: epoll_ctl failed");
             }
         }

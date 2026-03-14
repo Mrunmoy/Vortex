@@ -39,6 +39,7 @@ namespace ms
 
         // Initialize the run loop. `name` identifies this loop
         // for debugging/logging purposes.
+        // Throws std::system_error on failure (epoll/pipe creation).
         void init(const char *name);
 
         // Block the calling thread, dispatching events until stop() is called.
@@ -53,11 +54,15 @@ namespace ms
         void executeOnRunLoop(std::function<void()> fn);
 
         // Watch a file descriptor for readability. When data is available,
-        // `handler` is called on the run loop thread.
+        // `handler` is called on the run loop thread. If `fd` is already
+        // watched, replaces the existing handler.
         // Thread-safe — can be called from any thread.
+        // Throws std::system_error on epoll_ctl failure.
         void addSource(int fd, std::function<void()> handler);
 
         // Stop watching a file descriptor. Thread-safe.
+        // Throws std::system_error on unexpected epoll_ctl failure
+        // (ENOENT/EBADF are treated as benign).
         void removeSource(int fd);
 
         bool isRunning() const { return m_running.load(std::memory_order_acquire); }
