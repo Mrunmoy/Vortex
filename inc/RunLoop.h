@@ -43,6 +43,7 @@ namespace ms
         void init(const char *name);
 
         // Block the calling thread, dispatching events until stop() is called.
+        // Throws std::system_error on epoll_wait failure.
         void run();
 
         // Signal the run loop to exit. Thread-safe, callable from any thread
@@ -62,7 +63,7 @@ namespace ms
 
         // Stop watching a file descriptor. Thread-safe.
         // Throws std::system_error on unexpected epoll_ctl failure
-        // (ENOENT/EBADF are treated as benign).
+        // (ENOENT is treated as benign).
         void removeSource(int fd);
 
         bool isRunning() const { return m_running.load(std::memory_order_acquire); }

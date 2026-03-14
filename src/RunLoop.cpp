@@ -91,7 +91,8 @@ namespace ms
             {
                 if (errno == EINTR)
                     continue;
-                break;
+                throw std::system_error(errno, std::generic_category(),
+                                        "RunLoop::run: epoll_wait failed");
             }
 
             for (int i = 0; i < n; ++i)
@@ -196,9 +197,9 @@ namespace ms
         if (epoll_ctl(m_epollFd, EPOLL_CTL_DEL, fd, nullptr) != 0)
         {
             // ENOENT: fd was not registered in epoll (e.g., it was already
-            // closed and auto-removed by the kernel). EBADF: fd is closed.
-            // Both are benign — the descriptor is no longer monitored either way.
-            if (errno != ENOENT && errno != EBADF)
+            // closed and auto-removed by the kernel). This is benign — the
+            // descriptor is no longer monitored either way.
+            if (errno != ENOENT)
             {
                 int savedErrno = errno;
                 m_sources[fd] = std::move(saved);

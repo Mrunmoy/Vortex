@@ -50,16 +50,18 @@ Access it as `ms::RunLoop::Version::major` or check the packed value for compati
 
 ## 2) The public API surface
 
-The class is intentionally small — five methods and two queries:
+The class is intentionally small — six methods and two queries:
 
 ```cpp
 class RunLoop
 {
 public:
-    void init(const char *name);
-    void run();
+    void init(const char *name);   // throws on failure
+    void run();                    // throws on epoll_wait failure
     void stop();
     void executeOnRunLoop(std::function<void()> fn);
+    void addSource(int fd, std::function<void()> handler);  // throws on failure
+    void removeSource(int fd);     // throws on unexpected failure
 
     bool isRunning() const;
     const char *name() const;
@@ -78,7 +80,7 @@ RunLoop &operator=(const RunLoop &) = delete;
 ## 3) Private state: the pieces that make it work
 
 ```cpp
-const char *m_name = "";
+std::string m_name;
 int m_epollFd = -1;
 int m_wakeupFd[2] = {-1, -1};
 
@@ -87,14 +89,18 @@ std::atomic<bool> m_stopRequested{false};
 
 std::mutex m_postMutex;
 std::vector<std::function<void()>> m_postQueue;
+
+std::mutex m_sourcesMutex;
+std::unordered_map<int, std::function<void()>> m_sources;
 ```
 
 What each piece does:
-- `m_name` — debug identifier, set by `init()`
+- `m_name` — debug identifier (`std::string`), set by `init()`. `name()` returns `c_str()`
 - `m_epollFd` — the epoll instance that drives the event loop
 - `m_wakeupFd` — a pipe pair used to wake epoll from another thread
 - `m_running` / `m_stopRequested` — atomic flags for lifecycle coordination
 - `m_postMutex` + `m_postQueue` — the thread-safe work queue
+- `m_sourcesMutex` + `m_sources` — thread-safe fd-to-handler map for watched file descriptors
 
 ---
 
@@ -103,18 +109,41 @@ What each piece does:
 ```cpp
 void RunLoop::init(const char *name)
 {
-    m_name = name;
+    m_name = name ? name : "";
     m_epollFd = epoll_create1(EPOLL_CLOEXEC);
+    if (m_epollFd < 0)
+        throw std::system_error(errno, std::generic_category(),
+                                "RunLoop::init: epoll_create1 failed");
 
-    if (pipe2(m_wakeupFd, O_CLOEXEC | O_NONBLOCK) == 0)
+    if (pipe2(m_wakeupFd, O_CLOEXEC | O_NONBLOCK) != 0)
     {
-        struct epoll_event ev{};
-        ev.events = EPOLLIN;
-        ev.data.fd = m_wakeupFd[0];
-        epoll_ctl(m_epollFd, EPOLL_CTL_ADD, m_wakeupFd[0], &ev);
+        close(m_epollFd);
+        m_epollFd = -1;
+        throw std::system_error(errno, std::generic_category(),
+                                "RunLoop::init: pipe2 failed");
+    }
+
+    struct epoll_event ev{};
+    ev.events = EPOLLIN;
+    ev.data.fd = m_wakeupFd[0];
+    if (epoll_ctl(m_epollFd, EPOLL_CTL_ADD, m_wakeupFd[0], &ev) != 0)
+    {
+        close(m_wakeupFd[0]);
+        close(m_wakeupFd[1]);
+        m_wakeupFd[0] = m_wakeupFd[1] = -1;
+        close(m_epollFd);
+        m_epollFd = -1;
+        throw std::system_error(errno, std::generic_category(),
+                                "RunLoop::init: epoll_ctl failed");
     }
 }
 ```
+
+### Error handling
+
+Each syscall is checked. On failure, already-opened fds are cleaned up and
+`std::system_error` is thrown, leaving the `RunLoop` in a safe default state
+(all fds set to `-1`). A `nullptr` name is treated as empty string.
 
 ### The epoll instance
 
@@ -161,21 +190,36 @@ void RunLoop::run()
                 batch.swap(m_postQueue);
             }
             for (auto &fn : batch)
-            {
                 fn();
-            }
         }
 
         int n = epoll_wait(m_epollFd, events, MAX_EVENTS, -1);
+        if (n < 0)
+        {
+            if (errno == EINTR)
+                continue;
+            throw std::system_error(errno, std::generic_category(),
+                                    "RunLoop::run: epoll_wait failed");
+        }
 
         for (int i = 0; i < n; ++i)
         {
             if (events[i].data.fd == m_wakeupFd[0])
             {
                 char buf[64];
-                while (read(m_wakeupFd[0], buf, sizeof(buf)) > 0)
+                while (read(m_wakeupFd[0], buf, sizeof(buf)) > 0) {}
+            }
+            else
+            {
+                std::function<void()> handler;
                 {
+                    std::lock_guard<std::mutex> lock(m_sourcesMutex);
+                    auto it = m_sources.find(events[i].data.fd);
+                    if (it != m_sources.end())
+                        handler = it->second;
                 }
+                if (handler)
+                    handler();
             }
         }
     }
@@ -195,10 +239,11 @@ void RunLoop::run()
 
 3. **Wait for events** — `epoll_wait(..., -1)` blocks until something happens.
    The `-1` timeout means "wait forever" — no busy-spinning, no polling.
+   If interrupted by a signal (`EINTR`), the loop continues. Any other error
+   throws `std::system_error`.
 
-4. **Drain the wakeup pipe** — When the pipe is readable, we consume all bytes.
-   Multiple `executeOnRunLoop()` calls may have written multiple bytes — we drain
-   them all so the pipe doesn't fill up.
+4. **Dispatch fd events** — For each ready fd, if it's the wakeup pipe, drain it.
+   Otherwise look up the handler in `m_sources` (under lock) and invoke it.
 
 5. **Check stop** — If `m_stopRequested` is true, exit the loop.
 
@@ -264,7 +309,30 @@ to the loop thread.
 
 ---
 
-## 8) `wakeup()`: the one-byte signal
+## 8) `addSource()` / `removeSource()`: watching file descriptors
+
+```cpp
+void RunLoop::addSource(int fd, std::function<void()> handler)
+```
+
+Registers `fd` for `EPOLLIN` monitoring. If `fd` is already watched, the handler is
+replaced using `EPOLL_CTL_MOD`. If the kernel auto-removed the fd (e.g. it was closed),
+`ENOENT` on `EPOLL_CTL_MOD` triggers a retry with `EPOLL_CTL_ADD` to self-heal.
+On failure, `m_sources` is rolled back and `std::system_error` is thrown.
+
+```cpp
+void RunLoop::removeSource(int fd)
+```
+
+Stops watching `fd`. `ENOENT` from `epoll_ctl` is treated as benign (fd already
+gone from epoll). Other errors roll back and throw.
+
+Both methods hold `m_sourcesMutex` across the map update and `epoll_ctl` call
+to prevent races between concurrent `addSource`/`removeSource` calls.
+
+---
+
+## 9) `wakeup()`: the one-byte signal
 
 ```cpp
 void RunLoop::wakeup()
@@ -284,7 +352,7 @@ would indicate a much bigger problem.
 
 ---
 
-## 9) Destructor: cleanup
+## 10) Destructor: cleanup
 
 ```cpp
 RunLoop::~RunLoop()
@@ -313,21 +381,23 @@ Safety:
 
 ---
 
-## 10) The threading story in one sentence
+## 11) The threading story in one sentence
 
 - Any thread can call `executeOnRunLoop()` to queue work (mutex-protected).
+- Any thread can call `addSource()` / `removeSource()` to manage watched fds (mutex-protected).
 - The loop thread drains the queue and executes callables sequentially (no lock held).
 - `stop()` sets an atomic flag and wakes epoll; the loop exits on its next iteration.
 
 ---
 
-## 11) Why this design?
+## 12) Why this design?
 
 ### Why epoll and not just a condition variable?
 
-Epoll gives you a future-proof event loop. Right now, the only event source is the
-wakeup pipe. But the same `m_epollFd` can monitor sockets, timers, signalfd, eventfd —
-anything with a file descriptor. The loop is ready to grow without changing its core structure.
+Epoll gives you a future-proof event loop. Right now, the only built-in event source is the
+wakeup pipe, but `addSource()` lets you monitor any fd. The same `m_epollFd` can watch
+sockets, timers, signalfd, eventfd — anything with a file descriptor. The loop is ready
+to grow without changing its core structure.
 
 ### Why `std::function<void()>` and not a custom callable?
 
