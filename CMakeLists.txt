@@ -18,6 +18,12 @@ else()
     set(_backend "stub")
 endif()
 
+set(_valid_backends epoll kqueue win32 stub)
+if(NOT _backend IN_LIST _valid_backends)
+    message(FATAL_ERROR "ms-runloop: unknown backend '${_backend}'. "
+                        "Valid options: ${_valid_backends}")
+endif()
+
 message(STATUS "ms-runloop: using backend '${_backend}'")
 
 # ── Library ──────────────────────────────────────────────────────────

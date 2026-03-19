@@ -13,6 +13,15 @@
 namespace ms
 {
 
+    // Win32 backend notes:
+    // - Sources must be waitable kernel objects (events, semaphores, mutexes,
+    //   processes, threads). Pipes and sockets are NOT waitable for readability
+    //   via WaitForMultipleObjects — use overlapped I/O for those.
+    // - Maximum source count is MAXIMUM_WAIT_OBJECTS - 1 (63), since the
+    //   wakeup event occupies one slot.
+
+    static constexpr DWORD MAX_SOURCES = MAXIMUM_WAIT_OBJECTS - 1;
+
     RunLoop::RunLoop() = default;
 
     RunLoop::~RunLoop()
@@ -41,13 +50,13 @@ namespace ms
 
         m_name = name ? name : "";
 
-        // Create an I/O completion port (used as a general-purpose event queue).
-        m_pollHandle = CreateIoCompletionPort(INVALID_HANDLE_VALUE, nullptr, 0, 1);
+        // Sentinel handle to mark as initialized (not used for polling).
+        m_pollHandle = CreateEventA(nullptr, FALSE, FALSE, nullptr);
         if (m_pollHandle == nullptr)
         {
             throw std::system_error(static_cast<int>(GetLastError()),
                                     std::system_category(),
-                                    "RunLoop::init: CreateIoCompletionPort failed");
+                                    "RunLoop::init: CreateEvent (poll) failed");
         }
 
         // Manual-reset event for wakeup signalling.
@@ -58,7 +67,7 @@ namespace ms
             m_pollHandle = nullptr;
             throw std::system_error(static_cast<int>(GetLastError()),
                                     std::system_category(),
-                                    "RunLoop::init: CreateEvent failed");
+                                    "RunLoop::init: CreateEvent (wakeup) failed");
         }
     }
 
@@ -101,9 +110,6 @@ namespace ms
                 }
 
                 DWORD count = static_cast<DWORD>(handles.size());
-                if (count > MAXIMUM_WAIT_OBJECTS)
-                    count = MAXIMUM_WAIT_OBJECTS;
-
                 DWORD result = WaitForMultipleObjects(count, handles.data(), FALSE, INFINITE);
 
                 if (result == WAIT_FAILED)
@@ -168,13 +174,21 @@ namespace ms
     void RunLoop::addSource(NativeHandle handle, std::function<void()> handler)
     {
         std::lock_guard<std::mutex> lock(m_sourcesMutex);
+        if (m_sources.find(handle) == m_sources.end() && m_sources.size() >= MAX_SOURCES)
+        {
+            throw std::runtime_error(
+                "RunLoop::addSource: source limit reached (max "
+                + std::to_string(MAX_SOURCES) + ")");
+        }
         m_sources[handle] = std::move(handler);
+        wakeup();
     }
 
     void RunLoop::removeSource(NativeHandle handle)
     {
         std::lock_guard<std::mutex> lock(m_sourcesMutex);
         m_sources.erase(handle);
+        wakeup();
     }
 
     void RunLoop::wakeup()

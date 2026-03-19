@@ -63,11 +63,17 @@ namespace ms
         // Thread-safe — can be called from any thread.
         void executeOnRunLoop(std::function<void()> fn);
 
-        // Watch a native handle for readability. When data is available,
-        // `handler` is called on the run loop thread. If `handle` is already
-        // watched, replaces the existing handler.
-        // Thread-safe — can be called from any thread.
+        // Watch a native handle. When signalled, `handler` is called on the
+        // run loop thread. If `handle` is already watched, replaces the
+        // existing handler. Thread-safe — can be called from any thread.
         // Throws std::system_error on failure.
+        //
+        // Backend-specific:
+        //   epoll/kqueue: monitors fd for readability (EPOLLIN / EVFILT_READ)
+        //   win32: handle must be a waitable kernel object (event, semaphore,
+        //          etc.); pipes/sockets require overlapped I/O instead.
+        //          Max 63 sources (MAXIMUM_WAIT_OBJECTS - 1).
+        //   stub: handler is stored but never fired (no OS polling).
         void addSource(NativeHandle handle, std::function<void()> handler);
 
         // Stop watching a native handle. Thread-safe.
