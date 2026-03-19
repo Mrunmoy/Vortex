@@ -24,22 +24,22 @@ namespace ms
             close(m_wakeupFd[0]);
             close(m_wakeupFd[1]);
         }
-        if (m_epollFd >= 0)
+        if (m_pollFd >= 0)
         {
-            close(m_epollFd);
+            close(m_pollFd);
         }
     }
 
     void RunLoop::init(const char *name)
     {
-        if (m_epollFd >= 0)
+        if (m_pollFd >= 0)
         {
             throw std::logic_error("RunLoop::init: already initialized");
         }
 
         m_name = name ? name : "";
-        m_epollFd = epoll_create1(EPOLL_CLOEXEC);
-        if (m_epollFd < 0)
+        m_pollFd = epoll_create1(EPOLL_CLOEXEC);
+        if (m_pollFd < 0)
         {
             throw std::system_error(errno, std::generic_category(),
                                     "RunLoop::init: epoll_create1 failed");
@@ -47,8 +47,8 @@ namespace ms
 
         if (pipe2(m_wakeupFd, O_CLOEXEC | O_NONBLOCK) != 0)
         {
-            close(m_epollFd);
-            m_epollFd = -1;
+            close(m_pollFd);
+            m_pollFd = -1;
             throw std::system_error(errno, std::generic_category(),
                                     "RunLoop::init: pipe2 failed");
         }
@@ -58,13 +58,13 @@ namespace ms
         };
         ev.events = EPOLLIN;
         ev.data.fd = m_wakeupFd[0];
-        if (epoll_ctl(m_epollFd, EPOLL_CTL_ADD, m_wakeupFd[0], &ev) != 0)
+        if (epoll_ctl(m_pollFd, EPOLL_CTL_ADD, m_wakeupFd[0], &ev) != 0)
         {
             close(m_wakeupFd[0]);
             close(m_wakeupFd[1]);
             m_wakeupFd[0] = m_wakeupFd[1] = -1;
-            close(m_epollFd);
-            m_epollFd = -1;
+            close(m_pollFd);
+            m_pollFd = -1;
             throw std::system_error(errno, std::generic_category(),
                                     "RunLoop::init: epoll_ctl failed");
         }
@@ -102,7 +102,7 @@ namespace ms
                     }
                 }
 
-                int n = epoll_wait(m_epollFd, events, MAX_EVENTS, -1);
+                int n = epoll_wait(m_pollFd, events, MAX_EVENTS, -1);
                 if (n < 0)
                 {
                     if (errno == EINTR)
@@ -161,7 +161,7 @@ namespace ms
         wakeup();
     }
 
-    void RunLoop::addSource(int fd, std::function<void()> handler)
+    void RunLoop::addSource(NativeHandle fd, std::function<void()> handler)
     {
         struct epoll_event ev
         {
@@ -180,7 +180,7 @@ namespace ms
 
         m_sources[fd] = std::move(handler);
         int op = alreadyWatched ? EPOLL_CTL_MOD : EPOLL_CTL_ADD;
-        if (epoll_ctl(m_epollFd, op, fd, &ev) != 0)
+        if (epoll_ctl(m_pollFd, op, fd, &ev) != 0)
         {
             // If the fd was believed to be watched but epoll reports ENOENT,
             // it was likely auto-removed (e.g. after being closed). In that
@@ -188,7 +188,7 @@ namespace ms
             if (alreadyWatched && errno == ENOENT)
             {
                 op = EPOLL_CTL_ADD;
-                if (epoll_ctl(m_epollFd, op, fd, &ev) == 0)
+                if (epoll_ctl(m_pollFd, op, fd, &ev) == 0)
                 {
                     return;
                 }
@@ -204,7 +204,7 @@ namespace ms
         }
     }
 
-    void RunLoop::removeSource(int fd)
+    void RunLoop::removeSource(NativeHandle fd)
     {
         std::lock_guard<std::mutex> lock(m_sourcesMutex);
         auto it = m_sources.find(fd);
@@ -215,7 +215,7 @@ namespace ms
         std::function<void()> saved = std::move(it->second);
         m_sources.erase(it);
 
-        if (epoll_ctl(m_epollFd, EPOLL_CTL_DEL, fd, nullptr) != 0)
+        if (epoll_ctl(m_pollFd, EPOLL_CTL_DEL, fd, nullptr) != 0)
         {
             // ENOENT: fd was not registered in epoll (e.g., it was already
             // closed and auto-removed by the kernel). This is benign — the
