@@ -5,7 +5,7 @@
 #include <stdexcept>
 #include <system_error>
 #include <unistd.h>
-#include <sys/epoll.h>
+#include <sys/event.h>
 
 namespace ms
 {
@@ -24,49 +24,57 @@ namespace ms
             close(m_wakeupFd[0]);
             close(m_wakeupFd[1]);
         }
-        if (m_epollFd >= 0)
+        if (m_pollFd >= 0)
         {
-            close(m_epollFd);
+            close(m_pollFd);
         }
     }
 
     void RunLoop::init(const char *name)
     {
-        if (m_epollFd >= 0)
+        if (m_pollFd >= 0)
         {
             throw std::logic_error("RunLoop::init: already initialized");
         }
 
         m_name = name ? name : "";
-        m_epollFd = epoll_create1(EPOLL_CLOEXEC);
-        if (m_epollFd < 0)
+        m_pollFd = kqueue();
+        if (m_pollFd < 0)
         {
             throw std::system_error(errno, std::generic_category(),
-                                    "RunLoop::init: epoll_create1 failed");
+                                    "RunLoop::init: kqueue failed");
         }
 
-        if (pipe2(m_wakeupFd, O_CLOEXEC | O_NONBLOCK) != 0)
+        int fds[2];
+        if (pipe(fds) != 0)
         {
-            close(m_epollFd);
-            m_epollFd = -1;
+            close(m_pollFd);
+            m_pollFd = -1;
             throw std::system_error(errno, std::generic_category(),
-                                    "RunLoop::init: pipe2 failed");
+                                    "RunLoop::init: pipe failed");
+        }
+        m_wakeupFd[0] = fds[0];
+        m_wakeupFd[1] = fds[1];
+
+        // Set non-blocking and close-on-exec
+        for (int i = 0; i < 2; ++i)
+        {
+            int flags = fcntl(m_wakeupFd[i], F_GETFL);
+            fcntl(m_wakeupFd[i], F_SETFL, flags | O_NONBLOCK);
+            fcntl(m_wakeupFd[i], F_SETFD, FD_CLOEXEC);
         }
 
-        struct epoll_event ev
-        {
-        };
-        ev.events = EPOLLIN;
-        ev.data.fd = m_wakeupFd[0];
-        if (epoll_ctl(m_epollFd, EPOLL_CTL_ADD, m_wakeupFd[0], &ev) != 0)
+        struct kevent ev;
+        EV_SET(&ev, m_wakeupFd[0], EVFILT_READ, EV_ADD, 0, 0, nullptr);
+        if (kevent(m_pollFd, &ev, 1, nullptr, 0, nullptr) != 0)
         {
             close(m_wakeupFd[0]);
             close(m_wakeupFd[1]);
             m_wakeupFd[0] = m_wakeupFd[1] = -1;
-            close(m_epollFd);
-            m_epollFd = -1;
+            close(m_pollFd);
+            m_pollFd = -1;
             throw std::system_error(errno, std::generic_category(),
-                                    "RunLoop::init: epoll_ctl failed");
+                                    "RunLoop::init: kevent registration failed");
         }
     }
 
@@ -74,8 +82,6 @@ namespace ms
     {
         m_running.store(true, std::memory_order_release);
 
-        // Ensure flags are reset on all exit paths (normal exit, exceptions
-        // from handlers, or epoll_wait failures).
         auto resetFlags = [this]()
         {
             m_running.store(false, std::memory_order_release);
@@ -85,7 +91,7 @@ namespace ms
         try
         {
             constexpr int MAX_EVENTS = 32;
-            struct epoll_event events[MAX_EVENTS];
+            struct kevent events[MAX_EVENTS];
 
             while (!m_stopRequested.load(std::memory_order_acquire))
             {
@@ -102,18 +108,19 @@ namespace ms
                     }
                 }
 
-                int n = epoll_wait(m_epollFd, events, MAX_EVENTS, -1);
+                int n = kevent(m_pollFd, nullptr, 0, events, MAX_EVENTS, nullptr);
                 if (n < 0)
                 {
                     if (errno == EINTR)
                         continue;
                     throw std::system_error(errno, std::generic_category(),
-                                            "RunLoop::run: epoll_wait failed");
+                                            "RunLoop::run: kevent failed");
                 }
 
                 for (int i = 0; i < n; ++i)
                 {
-                    if (events[i].data.fd == m_wakeupFd[0])
+                    int fd = static_cast<int>(events[i].ident);
+                    if (fd == m_wakeupFd[0])
                     {
                         char buf[64];
                         while (read(m_wakeupFd[0], buf, sizeof(buf)) > 0) {}
@@ -123,7 +130,7 @@ namespace ms
                         std::function<void()> handler;
                         {
                             std::lock_guard<std::mutex> lock(m_sourcesMutex);
-                            auto it = m_sources.find(events[i].data.fd);
+                            auto it = m_sources.find(fd);
                             if (it != m_sources.end())
                             {
                                 handler = it->second;
@@ -161,71 +168,56 @@ namespace ms
         wakeup();
     }
 
-    void RunLoop::addSource(int fd, std::function<void()> handler)
+    void RunLoop::addSource(NativeHandle fd, std::function<void()> handler)
     {
-        struct epoll_event ev
-        {
-        };
-        ev.events = EPOLLIN;
-        ev.data.fd = fd;
+        struct kevent ev;
+        EV_SET(&ev, fd, EVFILT_READ, EV_ADD, 0, 0, nullptr);
 
         std::lock_guard<std::mutex> lock(m_sourcesMutex);
-        auto it = m_sources.find(fd);
-        bool alreadyWatched = (it != m_sources.end());
 
         // Save the previous handler so we can roll back on failure.
         std::function<void()> previous;
+        auto it = m_sources.find(fd);
+        bool alreadyWatched = (it != m_sources.end());
         if (alreadyWatched)
             previous = std::move(it->second);
 
         m_sources[fd] = std::move(handler);
-        int op = alreadyWatched ? EPOLL_CTL_MOD : EPOLL_CTL_ADD;
-        if (epoll_ctl(m_epollFd, op, fd, &ev) != 0)
-        {
-            // If the fd was believed to be watched but epoll reports ENOENT,
-            // it was likely auto-removed (e.g. after being closed). In that
-            // case, retry with EPOLL_CTL_ADD to resynchronize our state.
-            if (alreadyWatched && errno == ENOENT)
-            {
-                op = EPOLL_CTL_ADD;
-                if (epoll_ctl(m_epollFd, op, fd, &ev) == 0)
-                {
-                    return;
-                }
-            }
 
+        // kqueue EV_ADD replaces an existing filter automatically.
+        if (kevent(m_pollFd, &ev, 1, nullptr, 0, nullptr) != 0)
+        {
             int savedErrno = errno;
             if (alreadyWatched)
                 m_sources[fd] = std::move(previous);
             else
                 m_sources.erase(fd);
             throw std::system_error(savedErrno, std::generic_category(),
-                                    "RunLoop::addSource: epoll_ctl failed");
+                                    "RunLoop::addSource: kevent failed");
         }
     }
 
-    void RunLoop::removeSource(int fd)
+    void RunLoop::removeSource(NativeHandle fd)
     {
         std::lock_guard<std::mutex> lock(m_sourcesMutex);
         auto it = m_sources.find(fd);
         if (it == m_sources.end())
             return;
 
-        // Save the handler so we can roll back if epoll_ctl fails unexpectedly.
         std::function<void()> saved = std::move(it->second);
         m_sources.erase(it);
 
-        if (epoll_ctl(m_epollFd, EPOLL_CTL_DEL, fd, nullptr) != 0)
+        struct kevent ev;
+        EV_SET(&ev, fd, EVFILT_READ, EV_DELETE, 0, 0, nullptr);
+        if (kevent(m_pollFd, &ev, 1, nullptr, 0, nullptr) != 0)
         {
-            // ENOENT: fd was not registered in epoll (e.g., it was already
-            // closed and auto-removed by the kernel). This is benign — the
-            // descriptor is no longer monitored either way.
+            // ENOENT: fd not registered (already closed/removed). Benign.
             if (errno != ENOENT)
             {
                 int savedErrno = errno;
                 m_sources[fd] = std::move(saved);
                 throw std::system_error(savedErrno, std::generic_category(),
-                                        "RunLoop::removeSource: epoll_ctl failed");
+                                        "RunLoop::removeSource: kevent failed");
             }
         }
     }

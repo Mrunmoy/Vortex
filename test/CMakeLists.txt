@@ -14,7 +14,8 @@ add_subdirectory(vendor/googletest)
 add_executable(runloop_tests
     RunLoopTest.cpp
 )
-target_link_libraries(runloop_tests PRIVATE ms-runloop GTest::gtest_main pthread)
+find_package(Threads REQUIRED)
+target_link_libraries(runloop_tests PRIVATE ms-runloop GTest::gtest_main Threads::Threads)
 
 include(GoogleTest)
 gtest_discover_tests(runloop_tests)

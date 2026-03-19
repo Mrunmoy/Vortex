@@ -5,8 +5,16 @@
 #include <chrono>
 #include <stdexcept>
 #include <thread>
+
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#else
 #include <unistd.h>
 #include <fcntl.h>
+#endif
 
 using namespace ms;
 using namespace std::chrono_literals;
@@ -281,25 +289,118 @@ TEST(RunLoopTest, RestartAfterStop)
     EXPECT_TRUE(executed.load());
 }
 
-// Helper: create a non-blocking pipe and return {read_fd, write_fd}.
-static std::pair<int, int> makePipe()
+// ── Portable pipe helpers ────────────────────────────────────────────
+
+using Handle = ms::RunLoop::NativeHandle;
+
+#if defined(__linux__)
+
+static std::pair<Handle, Handle> makePipe()
 {
-    int fds[2];
-    [[maybe_unused]] int rc = pipe2(fds, O_CLOEXEC | O_NONBLOCK);
+    int fds[2] = {-1, -1};
+    int rc = pipe2(fds, O_CLOEXEC | O_NONBLOCK);
+    EXPECT_EQ(rc, 0) << "pipe2 failed: errno=" << errno;
     return {fds[0], fds[1]};
 }
 
-static void writeByte(int fd)
+static void writeByte(Handle fd)
 {
     char byte = 1;
     [[maybe_unused]] auto r = write(fd, &byte, 1);
 }
 
-static void drainPipe(int fd)
+static void drainPipe(Handle fd)
 {
     char buf[64];
     while (read(fd, buf, sizeof(buf)) > 0) {}
 }
+
+static void closePipe(Handle readFd, Handle writeFd)
+{
+    close(readFd);
+    close(writeFd);
+}
+
+#elif defined(__APPLE__)
+
+static std::pair<Handle, Handle> makePipe()
+{
+    int fds[2] = {-1, -1};
+    int rc = pipe(fds);
+    EXPECT_EQ(rc, 0) << "pipe failed: errno=" << errno;
+    if (rc == 0)
+    {
+        for (int i = 0; i < 2; ++i)
+        {
+            int flags = fcntl(fds[i], F_GETFL);
+            EXPECT_GE(flags, 0) << "fcntl F_GETFL failed: errno=" << errno;
+            EXPECT_EQ(fcntl(fds[i], F_SETFL, flags | O_NONBLOCK), 0);
+            EXPECT_EQ(fcntl(fds[i], F_SETFD, FD_CLOEXEC), 0);
+        }
+    }
+    return {fds[0], fds[1]};
+}
+
+static void writeByte(Handle fd)
+{
+    char byte = 1;
+    [[maybe_unused]] auto r = write(fd, &byte, 1);
+}
+
+static void drainPipe(Handle fd)
+{
+    char buf[64];
+    while (read(fd, buf, sizeof(buf)) > 0) {}
+}
+
+static void closePipe(Handle readFd, Handle writeFd)
+{
+    close(readFd);
+    close(writeFd);
+}
+
+#elif defined(_WIN32)
+
+static std::pair<Handle, Handle> makePipe()
+{
+    HANDLE readH = nullptr, writeH = nullptr;
+    BOOL ok = CreatePipe(&readH, &writeH, nullptr, 0);
+    EXPECT_TRUE(ok) << "CreatePipe failed: error=" << GetLastError();
+    return {readH, writeH};
+}
+
+static void writeByte(Handle h)
+{
+    DWORD written = 0;
+    char byte = 1;
+    WriteFile(static_cast<HANDLE>(h), &byte, 1, &written, nullptr);
+}
+
+static void drainPipe(Handle h)
+{
+    char buf[64];
+    DWORD avail = 0;
+    while (PeekNamedPipe(static_cast<HANDLE>(h), nullptr, 0, nullptr, &avail, nullptr) && avail > 0)
+    {
+        DWORD bytesRead = 0;
+        ReadFile(static_cast<HANDLE>(h), buf, sizeof(buf), &bytesRead, nullptr);
+    }
+}
+
+static void closePipe(Handle readH, Handle writeH)
+{
+    CloseHandle(static_cast<HANDLE>(readH));
+    CloseHandle(static_cast<HANDLE>(writeH));
+}
+
+#else // stub — no fd-based source tests
+
+static std::pair<Handle, Handle> makePipe() { return {-1, -1}; }
+static void writeByte(Handle) {}
+static void drainPipe(Handle) {}
+static void closePipe(Handle, Handle) {}
+
+#endif
 
 // ═════════════════════════════════════════════════════════════════════
 // addSource() fires handler when fd is readable.
@@ -337,8 +438,7 @@ TEST(RunLoopTest, AddAndRemoveSource)
 
     EXPECT_EQ(count.load(), 1);
 
-    close(readFd);
-    close(writeFd);
+    closePipe(readFd, writeFd);
 }
 
 // ═════════════════════════════════════════════════════════════════════
@@ -381,8 +481,7 @@ TEST(RunLoopTest, SourceCallbackRunsOnLoopThread)
     loop.stop();
     t.join();
 
-    close(readFd);
-    close(writeFd);
+    closePipe(readFd, writeFd);
 }
 
 // ═════════════════════════════════════════════════════════════════════
@@ -395,7 +494,7 @@ TEST(RunLoopTest, MultipleSourcesConcurrent)
     loop.init("MultiSource");
 
     constexpr int N = 3;
-    int readFds[N], writeFds[N];
+    Handle readFds[N], writeFds[N];
     for (int i = 0; i < N; ++i)
     {
         auto [r, w] = makePipe();
@@ -406,7 +505,7 @@ TEST(RunLoopTest, MultipleSourcesConcurrent)
     std::atomic<int> count{0};
     for (int i = 0; i < N; ++i)
     {
-        int rfd = readFds[i];
+        Handle rfd = readFds[i];
         loop.addSource(rfd, [&count, rfd] {
             drainPipe(rfd);
             count.fetch_add(1);
@@ -428,8 +527,7 @@ TEST(RunLoopTest, MultipleSourcesConcurrent)
     for (int i = 0; i < N; ++i)
     {
         loop.removeSource(readFds[i]);
-        close(readFds[i]);
-        close(writeFds[i]);
+        closePipe(readFds[i], writeFds[i]);
     }
 }
 
@@ -467,8 +565,7 @@ TEST(RunLoopTest, RemoveSourceFromHandler)
 
     EXPECT_EQ(count.load(), 1);
 
-    close(readFd);
-    close(writeFd);
+    closePipe(readFd, writeFd);
 }
 
 // ═════════════════════════════════════════════════════════════════════
@@ -518,8 +615,7 @@ TEST(RunLoopTest, UpdateSourceHandler)
     EXPECT_EQ(handler1Count.load(), 1); // first handler must not have fired again
 
     loop.removeSource(readFd);
-    close(readFd);
-    close(writeFd);
+    closePipe(readFd, writeFd);
 }
 
 // ═════════════════════════════════════════════════════════════════════
@@ -600,6 +696,5 @@ TEST(RunLoopTest, AddSourceFromAnyThread)
     EXPECT_TRUE(fired.load());
 
     loop.removeSource(readFd);
-    close(readFd);
-    close(writeFd);
+    closePipe(readFd, writeFd);
 }

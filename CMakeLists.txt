@@ -2,17 +2,42 @@ cmake_minimum_required(VERSION 3.14)
 
 project(ms-runloop
     LANGUAGES CXX
-    DESCRIPTION "Epoll-based event loop with thread-safe callable posting"
+    DESCRIPTION "Cross-platform event loop with thread-safe callable posting"
 )
 
+# ── Platform backend selection ───────────────────────────────────────
+if(DEFINED MS_RUNLOOP_BACKEND)
+    set(_backend ${MS_RUNLOOP_BACKEND})
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set(_backend "epoll")
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    set(_backend "kqueue")
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+    set(_backend "win32")
+else()
+    set(_backend "stub")
+endif()
+
+set(_valid_backends epoll kqueue win32 stub)
+if(NOT _backend IN_LIST _valid_backends)
+    message(FATAL_ERROR "ms-runloop: unknown backend '${_backend}'. "
+                        "Valid options: ${_valid_backends}")
+endif()
+
+message(STATUS "ms-runloop: using backend '${_backend}'")
+
 # ── Library ──────────────────────────────────────────────────────────
-add_library(ms-runloop src/RunLoop.cpp)
+add_library(ms-runloop src/backend_${_backend}.cpp)
 target_include_directories(ms-runloop PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/inc>
     $<INSTALL_INTERFACE:include>
 )
 target_compile_features(ms-runloop PUBLIC cxx_std_17)
-target_link_libraries(ms-runloop PRIVATE pthread)
+
+if(NOT _backend STREQUAL "win32")
+    find_package(Threads REQUIRED)
+    target_link_libraries(ms-runloop PRIVATE Threads::Threads)
+endif()
 
 # ── Tests and examples (only when building standalone) ───────────────
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
