@@ -3,6 +3,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <stdexcept>
 #include <thread>
 #include <unistd.h>
 #include <fcntl.h>
@@ -471,7 +472,102 @@ TEST(RunLoopTest, RemoveSourceFromHandler)
 }
 
 // ═════════════════════════════════════════════════════════════════════
-// addSource() from a different thread while loop is running.
+// addSource() called twice with the same fd replaces the handler.
+// ═════════════════════════════════════════════════════════════════════
+
+TEST(RunLoopTest, UpdateSourceHandler)
+{
+    RunLoop loop;
+    loop.init("UpdateSource");
+
+    auto [readFd, writeFd] = makePipe();
+
+    std::atomic<int> handler1Count{0};
+    std::atomic<int> handler2Count{0};
+
+    loop.addSource(readFd, [&] {
+        drainPipe(readFd);
+        handler1Count.fetch_add(1);
+    });
+
+    RunLoopGuard guard(loop);
+    std::this_thread::sleep_for(10ms);
+
+    // Trigger with the first handler.
+    writeByte(writeFd);
+
+    for (int i = 0; i < 200 && handler1Count.load() < 1; ++i)
+        std::this_thread::sleep_for(5ms);
+
+    EXPECT_EQ(handler1Count.load(), 1);
+    EXPECT_EQ(handler2Count.load(), 0);
+
+    // Replace the handler — must not fail or leave epoll in a broken state.
+    loop.addSource(readFd, [&] {
+        drainPipe(readFd);
+        handler2Count.fetch_add(1);
+    });
+
+    // Trigger with the second handler.
+    writeByte(writeFd);
+
+    for (int i = 0; i < 200 && handler2Count.load() < 1; ++i)
+        std::this_thread::sleep_for(5ms);
+
+    EXPECT_EQ(handler2Count.load(), 1);
+    EXPECT_EQ(handler1Count.load(), 1); // first handler must not have fired again
+
+    loop.removeSource(readFd);
+    close(readFd);
+    close(writeFd);
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// Exception from a posted callable propagates out of run() and the
+// loop is restartable afterwards.
+// ═════════════════════════════════════════════════════════════════════
+
+TEST(RunLoopTest, ExceptionFromCallablePropagatesToRun)
+{
+    RunLoop loop;
+    loop.init("ExThrow");
+
+    // Post a callable that throws, then run the loop on a thread.
+    loop.executeOnRunLoop([] {
+        throw std::runtime_error("test exception");
+    });
+
+    std::exception_ptr captured;
+    std::thread t([&] {
+        try
+        {
+            loop.run();
+        }
+        catch (...)
+        {
+            captured = std::current_exception();
+        }
+    });
+    t.join();
+
+    // The exception must have propagated.
+    ASSERT_TRUE(captured != nullptr);
+    EXPECT_THROW(std::rethrow_exception(captured), std::runtime_error);
+
+    // Flags must be reset — isRunning() should be false and run() restartable.
+    EXPECT_FALSE(loop.isRunning());
+
+    // Verify the loop is actually restartable by running and stopping it.
+    std::thread t2([&] { loop.run(); });
+    std::this_thread::sleep_for(10ms);
+    EXPECT_TRUE(loop.isRunning());
+    loop.stop();
+    t2.join();
+    EXPECT_FALSE(loop.isRunning());
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// addSource() from a non-loop thread works correctly.
 // ═════════════════════════════════════════════════════════════════════
 
 TEST(RunLoopTest, AddSourceFromAnyThread)

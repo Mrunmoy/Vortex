@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <functional>
 #include <mutex>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -36,11 +37,16 @@ namespace ms
         RunLoop(const RunLoop &) = delete;
         RunLoop &operator=(const RunLoop &) = delete;
 
-        // Initialize the run loop. `name` identifies this loop
-        // for debugging/logging purposes.
+        // Initialize the run loop. Must be called exactly once per instance.
+        // `name` identifies this loop for debugging/logging purposes.
+        // Throws std::logic_error if already initialized.
+        // Throws std::system_error on failure (epoll/pipe setup).
         void init(const char *name);
 
         // Block the calling thread, dispatching events until stop() is called.
+        // Throws std::system_error on epoll_wait failure. Propagates any
+        // exception thrown by a posted callable or fd handler.
+        // Flags are reset on all exit paths (the loop is restartable).
         void run();
 
         // Signal the run loop to exit. Thread-safe, callable from any thread
@@ -52,20 +58,24 @@ namespace ms
         void executeOnRunLoop(std::function<void()> fn);
 
         // Watch a file descriptor for readability. When data is available,
-        // `handler` is called on the run loop thread.
+        // `handler` is called on the run loop thread. If `fd` is already
+        // watched, replaces the existing handler.
         // Thread-safe — can be called from any thread.
+        // Throws std::system_error on epoll_ctl failure.
         void addSource(int fd, std::function<void()> handler);
 
         // Stop watching a file descriptor. Thread-safe.
+        // Throws std::system_error on unexpected epoll_ctl failure
+        // (ENOENT is treated as benign).
         void removeSource(int fd);
 
         bool isRunning() const { return m_running.load(std::memory_order_acquire); }
-        const char *name() const { return m_name; }
+        const char *name() const { return m_name.c_str(); }
 
     private:
         void wakeup();
 
-        const char *m_name = "";
+        std::string m_name;
         int m_epollFd = -1;
         int m_wakeupFd[2] = {-1, -1};
 
