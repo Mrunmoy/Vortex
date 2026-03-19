@@ -37,14 +37,15 @@ namespace ms
         RunLoop(const RunLoop &) = delete;
         RunLoop &operator=(const RunLoop &) = delete;
 
-        // Initialize the run loop. `name` identifies this loop
-        // for debugging/logging purposes.
+        // Initialize the run loop. Must be called exactly once per instance.
+        // `name` identifies this loop for debugging/logging purposes.
+        // Throws std::logic_error if already initialized.
         // Throws std::system_error on failure (epoll/pipe setup).
         void init(const char *name);
 
         // Block the calling thread, dispatching events until stop() is called.
-        // Throws std::system_error on epoll_wait failure. Also propagates
-        // any exceptions thrown by posted callables or fd handlers.
+        // Throws std::system_error on epoll_wait failure. Propagates any
+        // exception thrown by a posted callable or fd handler.
         // Flags are reset on all exit paths (the loop is restartable).
         void run();
 

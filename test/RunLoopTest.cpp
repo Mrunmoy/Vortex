@@ -3,6 +3,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <stdexcept>
 #include <thread>
 #include <unistd.h>
 #include <fcntl.h>
@@ -519,6 +520,50 @@ TEST(RunLoopTest, UpdateSourceHandler)
     loop.removeSource(readFd);
     close(readFd);
     close(writeFd);
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// Exception from a posted callable propagates out of run() and the
+// loop is restartable afterwards.
+// ═════════════════════════════════════════════════════════════════════
+
+TEST(RunLoopTest, ExceptionFromCallablePropagatesToRun)
+{
+    RunLoop loop;
+    loop.init("ExThrow");
+
+    // Post a callable that throws, then run the loop on a thread.
+    loop.executeOnRunLoop([] {
+        throw std::runtime_error("test exception");
+    });
+
+    std::exception_ptr captured;
+    std::thread t([&] {
+        try
+        {
+            loop.run();
+        }
+        catch (...)
+        {
+            captured = std::current_exception();
+        }
+    });
+    t.join();
+
+    // The exception must have propagated.
+    ASSERT_TRUE(captured != nullptr);
+    EXPECT_THROW(std::rethrow_exception(captured), std::runtime_error);
+
+    // Flags must be reset — isRunning() should be false and run() restartable.
+    EXPECT_FALSE(loop.isRunning());
+
+    // Verify the loop is actually restartable by running and stopping it.
+    std::thread t2([&] { loop.run(); });
+    std::this_thread::sleep_for(10ms);
+    EXPECT_TRUE(loop.isRunning());
+    loop.stop();
+    t2.join();
+    EXPECT_FALSE(loop.isRunning());
 }
 
 // ═════════════════════════════════════════════════════════════════════

@@ -56,8 +56,8 @@ The class is intentionally small — six methods and two queries:
 class RunLoop
 {
 public:
-    void init(const char *name);   // throws on failure
-    void run();                    // throws on epoll_wait failure
+    void init(const char *name);   // throws on failure; single-use
+    void run();                    // throws on failure or callback exception
     void stop();
     void executeOnRunLoop(std::function<void()> fn);
     void addSource(int fd, std::function<void()> handler);  // throws on failure
@@ -141,9 +141,10 @@ void RunLoop::init(const char *name)
 
 ### Error handling
 
-Each syscall is checked. On failure, already-opened fds are cleaned up and
-`std::system_error` is thrown, leaving the `RunLoop` in a safe default state
-(all fds set to `-1`). A `nullptr` name is treated as empty string.
+`init()` must be called exactly once. Calling it on an already-initialized instance
+throws `std::logic_error`. Each syscall is checked. On failure, already-opened fds
+are cleaned up and `std::system_error` is thrown, leaving the `RunLoop` in a safe
+default state (all fds set to `-1`). A `nullptr` name is treated as empty string.
 
 ### The epoll instance
 

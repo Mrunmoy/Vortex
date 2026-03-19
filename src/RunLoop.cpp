@@ -2,6 +2,7 @@
 
 #include <cerrno>
 #include <fcntl.h>
+#include <stdexcept>
 #include <system_error>
 #include <unistd.h>
 #include <sys/epoll.h>
@@ -31,6 +32,11 @@ namespace ms
 
     void RunLoop::init(const char *name)
     {
+        if (m_epollFd >= 0)
+        {
+            throw std::logic_error("RunLoop::init: already initialized");
+        }
+
         m_name = name ? name : "";
         m_epollFd = epoll_create1(EPOLL_CLOEXEC);
         if (m_epollFd < 0)
