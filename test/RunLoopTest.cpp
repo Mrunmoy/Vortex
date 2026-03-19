@@ -297,7 +297,7 @@ using Handle = ms::RunLoop::NativeHandle;
 
 static std::pair<Handle, Handle> makePipe()
 {
-    int fds[2];
+    int fds[2] = {-1, -1};
     int rc = pipe2(fds, O_CLOEXEC | O_NONBLOCK);
     EXPECT_EQ(rc, 0) << "pipe2 failed: errno=" << errno;
     return {fds[0], fds[1]};
@@ -325,15 +325,18 @@ static void closePipe(Handle readFd, Handle writeFd)
 
 static std::pair<Handle, Handle> makePipe()
 {
-    int fds[2];
+    int fds[2] = {-1, -1};
     int rc = pipe(fds);
     EXPECT_EQ(rc, 0) << "pipe failed: errno=" << errno;
-    for (int i = 0; i < 2; ++i)
+    if (rc == 0)
     {
-        int flags = fcntl(fds[i], F_GETFL);
-        EXPECT_GE(flags, 0) << "fcntl F_GETFL failed: errno=" << errno;
-        EXPECT_EQ(fcntl(fds[i], F_SETFL, flags | O_NONBLOCK), 0);
-        EXPECT_EQ(fcntl(fds[i], F_SETFD, FD_CLOEXEC), 0);
+        for (int i = 0; i < 2; ++i)
+        {
+            int flags = fcntl(fds[i], F_GETFL);
+            EXPECT_GE(flags, 0) << "fcntl F_GETFL failed: errno=" << errno;
+            EXPECT_EQ(fcntl(fds[i], F_SETFL, flags | O_NONBLOCK), 0);
+            EXPECT_EQ(fcntl(fds[i], F_SETFD, FD_CLOEXEC), 0);
+        }
     }
     return {fds[0], fds[1]};
 }
