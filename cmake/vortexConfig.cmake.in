@@ -1,0 +1,40 @@
+if(TARGET vortex::vortex)
+    return()
+endif()
+
+get_filename_component(_VORTEX_CMAKE_DIR "${CMAKE_CURRENT_LIST_FILE}" DIRECTORY)
+get_filename_component(_VORTEX_PREFIX "${_VORTEX_CMAKE_DIR}/../../../" ABSOLUTE)
+
+find_library(_VORTEX_LIBRARY
+    NAMES vortex
+    PATHS "${_VORTEX_PREFIX}/lib" "${_VORTEX_PREFIX}/@CMAKE_INSTALL_LIBDIR@"
+    NO_DEFAULT_PATH
+)
+
+find_path(_VORTEX_INCLUDE_DIR
+    NAMES vortex.h
+    PATHS "${_VORTEX_PREFIX}/include" "${_VORTEX_PREFIX}/@CMAKE_INSTALL_INCLUDEDIR@"
+    NO_DEFAULT_PATH
+)
+
+if(_VORTEX_LIBRARY AND _VORTEX_INCLUDE_DIR)
+    add_library(vortex::vortex UNKNOWN IMPORTED)
+    set_target_properties(vortex::vortex PROPERTIES
+        IMPORTED_LOCATION "${_VORTEX_LIBRARY}"
+        INTERFACE_INCLUDE_DIRECTORIES "${_VORTEX_INCLUDE_DIR}"
+    )
+    if(NOT WIN32)
+        find_package(Threads REQUIRED)
+        set_property(TARGET vortex::vortex APPEND PROPERTY
+            INTERFACE_LINK_LIBRARIES Threads::Threads
+        )
+    endif()
+    set(vortex_FOUND TRUE)
+else()
+    set(vortex_FOUND FALSE)
+endif()
+
+unset(_VORTEX_CMAKE_DIR)
+unset(_VORTEX_PREFIX)
+unset(_VORTEX_LIBRARY)
+unset(_VORTEX_INCLUDE_DIR)

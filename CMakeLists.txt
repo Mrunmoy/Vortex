@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 3.14)
 
 project(Vortex
+    VERSION 1.1.0
     LANGUAGES CXX
     DESCRIPTION "Cross-platform event loop with thread-safe callable posting"
 )
@@ -30,18 +31,80 @@ endif()
 
 message(STATUS "Vortex: using backend '${_backend}'")
 
+function(vortex_configure_target target_name)
+    target_include_directories(${target_name} PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/inc>
+        $<INSTALL_INTERFACE:include>
+    )
+    target_compile_features(${target_name} PUBLIC cxx_std_17)
+
+    if(NOT _backend STREQUAL "win32")
+        find_package(Threads REQUIRED)
+        target_link_libraries(${target_name} PRIVATE Threads::Threads)
+    endif()
+endfunction()
+
 # ── Library ──────────────────────────────────────────────────────────
-add_library(vortex src/backend_${_backend}.cpp)
-target_include_directories(vortex PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/inc>
-    $<INSTALL_INTERFACE:include>
+add_library(vortex STATIC
+    src/backend_${_backend}.cpp
+    src/CApi.cpp
 )
-target_compile_features(vortex PUBLIC cxx_std_17)
+vortex_configure_target(vortex)
+
+add_library(vortex_shared SHARED
+    src/backend_${_backend}.cpp
+    src/CApi.cpp
+)
+vortex_configure_target(vortex_shared)
+set_target_properties(vortex_shared PROPERTIES
+    OUTPUT_NAME vortex
+    VERSION     ${PROJECT_VERSION}
+    SOVERSION   ${PROJECT_VERSION_MAJOR}
+)
+
+include(GNUInstallDirs)
+install(TARGETS vortex vortex_shared
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+)
+
+install(FILES inc/vortex.h
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+)
 
 if(NOT _backend STREQUAL "win32")
-    find_package(Threads REQUIRED)
-    target_link_libraries(vortex PRIVATE Threads::Threads)
+    set(VORTEX_THREAD_LIBS "-lpthread")
+else()
+    set(VORTEX_THREAD_LIBS "")
 endif()
+
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/cmake/vortex.pc.in
+    ${CMAKE_CURRENT_BINARY_DIR}/vortex.pc
+    @ONLY
+)
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/vortex.pc
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig
+)
+
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/cmake/vortexConfig.cmake.in
+    ${CMAKE_CURRENT_BINARY_DIR}/vortexConfig.cmake
+    @ONLY
+)
+
+include(CMakePackageConfigHelpers)
+write_basic_package_version_file(
+    ${CMAKE_CURRENT_BINARY_DIR}/vortexConfigVersion.cmake
+    VERSION ${PROJECT_VERSION}
+    COMPATIBILITY SameMajorVersion
+)
+install(FILES
+    ${CMAKE_CURRENT_BINARY_DIR}/vortexConfig.cmake
+    ${CMAKE_CURRENT_BINARY_DIR}/vortexConfigVersion.cmake
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/vortex
+)
 
 # ── Tests and examples (only when building standalone) ───────────────
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
