@@ -5,6 +5,8 @@ project(Vortex
     DESCRIPTION "Cross-platform event loop with thread-safe callable posting"
 )
 
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
 # ── Platform backend selection ───────────────────────────────────────
 if(DEFINED VORTEX_BACKEND)
     set(_backend ${VORTEX_BACKEND})
@@ -29,17 +31,16 @@ endif()
 message(STATUS "Vortex: using backend '${_backend}'")
 
 # ── Library ──────────────────────────────────────────────────────────
-add_library(Vortex src/backend_${_backend}.cpp)
-add_library(ms-runloop ALIAS Vortex)
-target_include_directories(Vortex PUBLIC
+add_library(vortex src/backend_${_backend}.cpp)
+target_include_directories(vortex PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/inc>
     $<INSTALL_INTERFACE:include>
 )
-target_compile_features(Vortex PUBLIC cxx_std_17)
+target_compile_features(vortex PUBLIC cxx_std_17)
 
 if(NOT _backend STREQUAL "win32")
     find_package(Threads REQUIRED)
-    target_link_libraries(Vortex PRIVATE Threads::Threads)
+    target_link_libraries(vortex PRIVATE Threads::Threads)
 endif()
 
 # ── Tests and examples (only when building standalone) ───────────────

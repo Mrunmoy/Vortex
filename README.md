@@ -73,7 +73,7 @@ python3 build.py -e
 
 ```cmake
 add_subdirectory(vendor/Vortex)
-target_link_libraries(your_target PRIVATE Vortex)
+target_link_libraries(your_target PRIVATE vortex)
 ```
 
 When used as a submodule, tests and examples are not built.
