@@ -5,7 +5,7 @@
 
 int main()
 {
-    ms::RunLoop loop;
+    vortex::RunLoop loop;
     loop.init("Example");
 
     // Start the run loop on a background thread

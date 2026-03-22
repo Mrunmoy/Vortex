@@ -10,7 +10,7 @@
 #endif
 #include <windows.h>
 
-namespace ms
+namespace vortex
 {
 
     // Win32 backend notes:
@@ -199,6 +199,6 @@ namespace ms
         }
     }
 
-} // namespace ms
+} // namespace vortex
 
 #endif // _WIN32

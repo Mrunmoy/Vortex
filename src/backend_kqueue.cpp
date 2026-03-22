@@ -7,7 +7,7 @@
 #include <unistd.h>
 #include <sys/event.h>
 
-namespace ms
+namespace vortex
 {
 
     RunLoop::RunLoop() = default;
@@ -228,4 +228,4 @@ namespace ms
         [[maybe_unused]] auto r = write(m_wakeupFd[1], &byte, 1);
     }
 
-} // namespace ms
+} // namespace vortex

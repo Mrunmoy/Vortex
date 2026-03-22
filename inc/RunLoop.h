@@ -8,7 +8,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace ms
+namespace vortex
 {
 
     // Pure event loop. Runs on a dedicated thread, allows other
@@ -112,4 +112,6 @@ namespace ms
         std::unordered_map<NativeHandle, std::function<void()>> m_sources;
     };
 
-} // namespace ms
+} // namespace vortex
+
+namespace ms = vortex;

@@ -1,6 +1,6 @@
 # Examples
 
-Usage examples for ms-runloop.
+Usage examples for Vortex.
 
 ## Building
 
@@ -9,7 +9,7 @@ Usage examples for ms-runloop.
 python3 build.py -e
 
 # Or with CMake directly:
-cmake -B build -DMS_RUNLOOP_BUILD_EXAMPLES=ON
+cmake -B build -DVORTEX_BUILD_EXAMPLES=ON
 cmake --build build -j$(nproc)
 ```
 
@@ -47,7 +47,7 @@ Done.
 **1. Create and initialize**
 
 ```cpp
-ms::RunLoop loop;
+vortex::RunLoop loop;
 loop.init("Example");
 ```
 
@@ -189,7 +189,7 @@ class SensorMonitor {
 public:
     using Callback = std::function<void(const SensorEvent &)>;
 
-    SensorMonitor(ms::RunLoop &loop) : m_loop(loop) {}
+    SensorMonitor(vortex::RunLoop &loop) : m_loop(loop) {}
 
     // Thread-safe: mutation happens on the loop thread
     void addListener(Callback cb) {
@@ -215,7 +215,7 @@ without data races on `m_listeners`.
 **1. Wire up components**
 
 ```cpp
-ms::RunLoop loop;
+vortex::RunLoop loop;
 loop.init("EventBus");
 
 Logger logger;

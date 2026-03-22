@@ -1,8 +1,8 @@
-# ms-runloop
+# Vortex
 
-[![Build](https://github.com/Mrunmoy/ms-runloop/actions/workflows/ci.yml/badge.svg)](https://github.com/Mrunmoy/ms-runloop/actions/workflows/ci.yml)
+[![Build](https://github.com/Mrunmoy/Vortex/actions/workflows/ci.yml/badge.svg)](https://github.com/Mrunmoy/Vortex/actions/workflows/ci.yml)
 
-Epoll-based event loop for C++17 with thread-safe callable posting.
+Cross-platform event loop for C++17 with thread-safe callable posting.
 
 > **Guided walkthrough** — [WalkthroughRunLoop.md](WalkthroughRunLoop.md) walks through every line of the implementation.
 
@@ -30,7 +30,7 @@ Epoll-based event loop for C++17 with thread-safe callable posting.
 ```cpp
 #include "RunLoop.h"
 
-ms::RunLoop loop;
+vortex::RunLoop loop;
 loop.init("MyApp");
 
 // Start on a background thread
@@ -54,8 +54,8 @@ t.join();
 
 ```bash
 # Clone
-git clone --recursive https://github.com/Mrunmoy/ms-runloop.git
-cd ms-runloop
+git clone --recursive https://github.com/Mrunmoy/Vortex.git
+cd Vortex
 
 # Build + test
 python3 build.py -t
@@ -72,8 +72,8 @@ python3 build.py -e
 ## Using as a Submodule
 
 ```cmake
-add_subdirectory(vendor/ms-runloop)
-target_link_libraries(your_target PRIVATE ms-runloop)
+add_subdirectory(vendor/Vortex)
+target_link_libraries(your_target PRIVATE Vortex)
 ```
 
 When used as a submodule, tests and examples are not built.
@@ -81,11 +81,11 @@ When used as a submodule, tests and examples are not built.
 ## Project Structure
 
 ```
-ms-runloop/
+Vortex/
 ├── inc/
 │   └── RunLoop.h              # Public header
 ├── src/
-│   └── RunLoop.cpp            # Implementation (epoll + pipe wakeup)
+│   └── backend_*.cpp          # Platform-specific implementations
 ├── test/
 │   ├── CMakeLists.txt
 │   ├── RunLoopTest.cpp        # 14 unit tests

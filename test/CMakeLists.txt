@@ -3,7 +3,7 @@
 # If it hasn't been cloned, print a helpful message and skip.
 
 if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vendor/googletest/CMakeLists.txt")
-    message(STATUS "ms-runloop: test/vendor/googletest not found, skipping tests. "
+    message(STATUS "Vortex: test/vendor/googletest not found, skipping tests. "
                    "Run: git submodule update --init --recursive")
     return()
 endif()
@@ -15,7 +15,7 @@ add_executable(runloop_tests
     RunLoopTest.cpp
 )
 find_package(Threads REQUIRED)
-target_link_libraries(runloop_tests PRIVATE ms-runloop GTest::gtest_main Threads::Threads)
+target_link_libraries(runloop_tests PRIVATE Vortex GTest::gtest_main Threads::Threads)
 
 include(GoogleTest)
 gtest_discover_tests(runloop_tests)

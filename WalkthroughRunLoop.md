@@ -32,7 +32,7 @@ Key constraints (we'll justify them as we go):
 ## 1) Versioning inside the class
 
 You keep a single source of truth for the library version, nested inside the class to avoid
-conflicts when used alongside other `ms::` libraries:
+conflicts when used alongside other libraries:
 
 ```cpp
 struct Version
@@ -44,7 +44,7 @@ struct Version
 };
 ```
 
-Access it as `ms::RunLoop::Version::major` or check the packed value for compatibility.
+Access it as `vortex::RunLoop::Version::major` or check the packed value for compatibility.
 
 ---
 

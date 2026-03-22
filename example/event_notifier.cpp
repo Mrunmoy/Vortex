@@ -58,7 +58,7 @@ class SensorMonitor
 public:
     using Callback = std::function<void(const SensorEvent &)>;
 
-    SensorMonitor(ms::RunLoop &loop) : m_loop(loop) {}
+    SensorMonitor(vortex::RunLoop &loop) : m_loop(loop) {}
 
     // Thread-safe: the actual mutation happens on the loop thread,
     // so it never races with notify().
@@ -104,7 +104,7 @@ private:
         }
     }
 
-    ms::RunLoop &m_loop;
+    vortex::RunLoop &m_loop;
     std::vector<Callback> m_listeners;
 };
 
@@ -112,7 +112,7 @@ private:
 
 int main()
 {
-    ms::RunLoop loop;
+    vortex::RunLoop loop;
     loop.init("EventBus");
 
     Logger logger;

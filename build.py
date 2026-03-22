@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Build script for ms-runloop.
+Build script for Vortex.
 
 Usage:
   python build.py                 # build only
@@ -44,7 +44,7 @@ def configure(examples=False):
         "-DCMAKE_BUILD_TYPE=Release",
     ]
     if examples:
-        cmd.append("-DMS_RUNLOOP_BUILD_EXAMPLES=ON")
+        cmd.append("-DVORTEX_BUILD_EXAMPLES=ON")
     run(cmd, cwd=SCRIPT_DIR)
 
 
@@ -57,7 +57,7 @@ def test():
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Build ms-runloop")
+    parser = argparse.ArgumentParser(description="Build Vortex")
     parser.add_argument("-c", "--clean", action="store_true", help="Clean build directory")
     parser.add_argument("-t", "--test", action="store_true", help="Build and run tests")
     parser.add_argument("-e", "--examples", action="store_true", help="Build examples")

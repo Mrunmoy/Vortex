@@ -4,7 +4,7 @@
 #include <stdexcept>
 #include <thread>
 
-namespace ms
+namespace vortex
 {
 
     RunLoop::RunLoop() = default;
@@ -110,4 +110,4 @@ namespace ms
         // No-op: the stub backend polls m_stopRequested via sleep loop.
     }
 
-} // namespace ms
+} // namespace vortex

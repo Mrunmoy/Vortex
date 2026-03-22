@@ -16,7 +16,7 @@
 #include <fcntl.h>
 #endif
 
-using namespace ms;
+using namespace vortex;
 using namespace std::chrono_literals;
 
 // Helper: run loop in background, auto-stop on scope exit.
@@ -291,7 +291,7 @@ TEST(RunLoopTest, RestartAfterStop)
 
 // ── Portable pipe helpers ────────────────────────────────────────────
 
-using Handle = ms::RunLoop::NativeHandle;
+using Handle = vortex::RunLoop::NativeHandle;
 
 #if defined(__linux__)
 

@@ -1,6 +1,6 @@
 # Tests
 
-Unit tests for ms-runloop, using [Google Test](https://github.com/google/googletest) v1.14.0.
+Unit tests for Vortex, using [Google Test](https://github.com/google/googletest) v1.14.0.
 
 ## Prerequisites
 
