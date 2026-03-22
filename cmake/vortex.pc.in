@@ -5,5 +5,5 @@ includedir=${prefix}/@CMAKE_INSTALL_INCLUDEDIR@
 Name: vortex
 Description: @PROJECT_DESCRIPTION@
 Version: @PROJECT_VERSION@
-Libs: -L${libdir} -lvortex -lpthread
+Libs: -L${libdir} -lvortex @VORTEX_THREAD_LIBS@
 Cflags: -I${includedir}

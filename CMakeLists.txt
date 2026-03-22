@@ -73,6 +73,12 @@ install(FILES inc/vortex.h
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )
 
+if(NOT _backend STREQUAL "win32")
+    set(VORTEX_THREAD_LIBS "-lpthread")
+else()
+    set(VORTEX_THREAD_LIBS "")
+endif()
+
 configure_file(
     ${CMAKE_CURRENT_SOURCE_DIR}/cmake/vortex.pc.in
     ${CMAKE_CURRENT_BINARY_DIR}/vortex.pc

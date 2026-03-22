@@ -1,6 +1,7 @@
 #include "vortex.h"
 #include "RunLoop.h"
 
+#include <atomic>
 #include <condition_variable>
 #include <cstdlib>
 #include <mutex>
@@ -14,7 +15,7 @@ struct vortex_impl
     std::mutex runMutex;
     std::condition_variable runCv;
     int activeRuns = 0;
-    bool initialized = false;
+    std::atomic<bool> initialized{false};
 };
 
 namespace
