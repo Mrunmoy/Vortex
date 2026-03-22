@@ -8,10 +8,12 @@ if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vendor/googletest/CMakeLists.txt")
     return()
 endif()
 
+set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 add_subdirectory(vendor/googletest)
 
 add_executable(runloop_tests
+    CApiTest.cpp
     RunLoopTest.cpp
 )
 find_package(Threads REQUIRED)
