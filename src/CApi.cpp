@@ -20,6 +20,14 @@ struct vortex_impl
 
 namespace
 {
+    vortex::RunLoop::NativeHandle to_native_handle(int fd)
+    {
+#if defined(_WIN32)
+        return reinterpret_cast<vortex::RunLoop::NativeHandle>(static_cast<intptr_t>(fd));
+#else
+        return fd;
+#endif
+    }
 
     int mapInitError()
     {
@@ -174,7 +182,7 @@ extern "C"
 
         try
         {
-            loop->loop.addSource(fd, [cb, user_data]() { cb(user_data); });
+            loop->loop.addSource(to_native_handle(fd), [cb, user_data]() { cb(user_data); });
             return VORTEX_SUCCESS;
         }
         catch (...)
@@ -186,7 +194,7 @@ extern "C"
     void vortex_remove_source(vortex_t loop, int fd)
     {
         if (loop && fd >= 0)
-            loop->loop.removeSource(fd);
+            loop->loop.removeSource(to_native_handle(fd));
     }
 
     int vortex_is_running(vortex_t loop)
