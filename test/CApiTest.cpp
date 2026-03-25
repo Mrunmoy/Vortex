@@ -381,3 +381,54 @@ TEST(CApiTest, TimerNullGuards)
     EXPECT_EQ(vortex_add_timer(guard.loop, 100, 0, [](void *) {}, nullptr, &timerId),
               VORTEX_ERR_NOT_INIT);
 }
+
+// ---------- Source Error Callback C API Tests ----------
+
+TEST(CApiTest, AddSourceWithErrorNullGuards)
+{
+    EXPECT_EQ(vortex_add_source_with_error(nullptr, 0, [](void *) {}, nullptr,
+                                            [](void *) {}, nullptr),
+              VORTEX_ERR_INVALID_ARGUMENT);
+
+    VortexGuard guard;
+    ASSERT_EQ(vortex_init(guard.loop, "ErrorNullGuards"), VORTEX_SUCCESS);
+    EXPECT_EQ(vortex_add_source_with_error(guard.loop, -1, [](void *) {}, nullptr,
+                                            [](void *) {}, nullptr),
+              VORTEX_ERR_INVALID_ARGUMENT);
+    EXPECT_EQ(vortex_add_source_with_error(guard.loop, 0, nullptr, nullptr,
+                                            [](void *) {}, nullptr),
+              VORTEX_ERR_INVALID_ARGUMENT);
+}
+
+#if !defined(_WIN32)
+TEST(CApiTest, AddSourceWithErrorCallback)
+{
+    VortexGuard guard;
+    ASSERT_EQ(vortex_init(guard.loop, "ErrorCallback"), VORTEX_SUCCESS);
+
+    int fds[2];
+    ASSERT_EQ(pipe(fds), 0);
+
+    std::atomic<bool> errorFired{false};
+
+    EXPECT_EQ(vortex_add_source_with_error(
+                  guard.loop, fds[0],
+                  [](void *) {},
+                  nullptr,
+                  [](void *ctx) { static_cast<std::atomic<bool> *>(ctx)->store(true); },
+                  &errorFired),
+              VORTEX_SUCCESS);
+
+    std::thread t([&] { vortex_run(guard.loop); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+
+    close(fds[1]);
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+    EXPECT_TRUE(errorFired.load());
+
+    vortex_stop(guard.loop);
+    t.join();
+    close(fds[0]);
+}
+#endif

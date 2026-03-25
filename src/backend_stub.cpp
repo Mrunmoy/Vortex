@@ -133,11 +133,14 @@ namespace vortex
 
     void RunLoop::addSource(NativeHandle handle, std::function<void()> handler)
     {
+        addSource(handle, std::move(handler), nullptr);
+    }
+
+    void RunLoop::addSource(NativeHandle handle, std::function<void()> handler,
+                            std::function<void()> onError)
+    {
         std::lock_guard<std::mutex> lock(m_sourcesMutex);
-        m_sources[handle] = std::move(handler);
-        // Stub: handler is stored but no OS-level monitoring is performed.
-        // Source handlers will not fire until a platform-specific backend
-        // is implemented for the target RTOS.
+        m_sources[handle] = {std::move(handler), std::move(onError)};
     }
 
     void RunLoop::removeSource(NativeHandle handle)

@@ -201,7 +201,7 @@ namespace vortex
                                 auto it = m_sources.find(signalled);
                                 if (it != m_sources.end())
                                 {
-                                    handler = it->second;
+                                    handler = it->second.handler;
                                 }
                             }
                             if (handler)
@@ -239,6 +239,12 @@ namespace vortex
 
     void RunLoop::addSource(NativeHandle handle, std::function<void()> handler)
     {
+        addSource(handle, std::move(handler), nullptr);
+    }
+
+    void RunLoop::addSource(NativeHandle handle, std::function<void()> handler,
+                            std::function<void()> onError)
+    {
         std::lock_guard<std::mutex> lock(m_sourcesMutex);
         if (m_sources.find(handle) == m_sources.end() && m_sources.size() >= MAX_SOURCES)
         {
@@ -246,7 +252,7 @@ namespace vortex
                 "RunLoop::addSource: source limit reached (max "
                 + std::to_string(MAX_SOURCES) + ")");
         }
-        m_sources[handle] = std::move(handler);
+        m_sources[handle] = {std::move(handler), std::move(onError)};
         wakeup();
     }
 

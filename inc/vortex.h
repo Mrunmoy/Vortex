@@ -27,6 +27,9 @@ void vortex_destroy(vortex_t loop);
 int vortex_post(vortex_t loop, vortex_callable_cb cb, void *user_data);
 
 int vortex_add_source(vortex_t loop, int fd, vortex_source_cb cb, void *user_data);
+int vortex_add_source_with_error(vortex_t loop, int fd,
+                                 vortex_source_cb cb, void *user_data,
+                                 vortex_source_cb on_error, void *error_data);
 void vortex_remove_source(vortex_t loop, int fd);
 
 // Schedule a timer. Returns timer id via `out_id` (>= 1) on success.
