@@ -297,6 +297,9 @@ namespace vortex
         struct itimerspec ts{};
         ts.it_value.tv_sec = intervalMs / 1000;
         ts.it_value.tv_nsec = (intervalMs % 1000) * 1000000L;
+        // timerfd disarms when both fields are zero; use 1ns minimum.
+        if (ts.it_value.tv_sec == 0 && ts.it_value.tv_nsec == 0)
+            ts.it_value.tv_nsec = 1;
         if (repeating)
         {
             ts.it_interval = ts.it_value;

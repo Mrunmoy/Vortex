@@ -143,6 +143,9 @@ namespace vortex
         std::mutex m_timersMutex;
         std::unordered_map<TimerId, TimerEntry> m_timers;
         std::atomic<TimerId> m_nextTimerId{1};
+#if defined(_WIN32)
+        std::vector<void *> m_retiredTimerHandles;
+#endif
     };
 
 } // namespace vortex

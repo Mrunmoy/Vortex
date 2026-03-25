@@ -39,6 +39,9 @@ namespace vortex
                 CloseHandle(entry.handle);
             }
         }
+        for (HANDLE h : m_retiredTimerHandles)
+            CloseHandle(h);
+        m_retiredTimerHandles.clear();
 
         if (m_wakeupHandle != nullptr)
         {
@@ -94,6 +97,14 @@ namespace vortex
         {
             while (!m_stopRequested.load(std::memory_order_acquire))
             {
+                // Close timer handles that were retired by removeTimer().
+                {
+                    std::lock_guard<std::mutex> lock(m_timersMutex);
+                    for (HANDLE h : m_retiredTimerHandles)
+                        CloseHandle(h);
+                    m_retiredTimerHandles.clear();
+                }
+
                 // Execute posted callables
                 {
                     std::vector<std::function<void()>> batch;
@@ -301,7 +312,10 @@ namespace vortex
         if (h != nullptr)
         {
             CancelWaitableTimer(h);
-            CloseHandle(h);
+            // Defer CloseHandle — the run loop may still reference the
+            // handle inside WaitForMultipleObjects. The run loop drains
+            // m_retiredTimerHandles after the wait returns.
+            m_retiredTimerHandles.push_back(h);
         }
         wakeup();
     }
