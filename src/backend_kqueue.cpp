@@ -151,16 +151,27 @@ namespace vortex
                     }
                     else
                     {
+                        bool isEof = (events[i].flags & EV_EOF) != 0;
+                        bool hasData = (events[i].data > 0);
+
                         std::function<void()> handler;
+                        std::function<void()> errorCb;
                         {
                             std::lock_guard<std::mutex> lock(m_sourcesMutex);
                             auto it = m_sources.find(ident);
                             if (it != m_sources.end())
                             {
-                                handler = it->second;
+                                handler = it->second.handler;
+                                errorCb = it->second.onError;
                             }
                         }
-                        if (handler)
+
+                        if (isEof && !hasData && errorCb)
+                        {
+                            errorCb();
+                            removeSource(ident);
+                        }
+                        else if (handler)
                         {
                             handler();
                         }
@@ -194,21 +205,25 @@ namespace vortex
 
     void RunLoop::addSource(NativeHandle fd, std::function<void()> handler)
     {
+        addSource(fd, std::move(handler), nullptr);
+    }
+
+    void RunLoop::addSource(NativeHandle fd, std::function<void()> handler,
+                            std::function<void()> onError)
+    {
         struct kevent ev;
         EV_SET(&ev, fd, EVFILT_READ, EV_ADD, 0, 0, nullptr);
 
         std::lock_guard<std::mutex> lock(m_sourcesMutex);
 
-        // Save the previous handler so we can roll back on failure.
-        std::function<void()> previous;
+        SourceEntry previous;
         auto it = m_sources.find(fd);
         bool alreadyWatched = (it != m_sources.end());
         if (alreadyWatched)
             previous = std::move(it->second);
 
-        m_sources[fd] = std::move(handler);
+        m_sources[fd] = {std::move(handler), std::move(onError)};
 
-        // kqueue EV_ADD replaces an existing filter automatically.
         if (kevent(m_pollFd, &ev, 1, nullptr, 0, nullptr) != 0)
         {
             int savedErrno = errno;
@@ -228,7 +243,7 @@ namespace vortex
         if (it == m_sources.end())
             return;
 
-        std::function<void()> saved = std::move(it->second);
+        SourceEntry saved = std::move(it->second);
         m_sources.erase(it);
 
         struct kevent ev;

@@ -79,6 +79,13 @@ namespace vortex
         //   stub: handler is stored but never fired (no OS polling).
         void addSource(NativeHandle handle, std::function<void()> handler);
 
+        /// Watch a native handle with an error/hangup callback.
+        /// `onError` fires on the run-loop thread when the source hits an
+        /// error or hangup (EPOLLHUP/EPOLLERR on Linux, EV_EOF on macOS).
+        /// The source is automatically removed after `onError` fires.
+        void addSource(NativeHandle handle, std::function<void()> handler,
+                       std::function<void()> onError);
+
         // Stop watching a native handle. Thread-safe.
         // Throws std::system_error on unexpected failure.
         void removeSource(NativeHandle handle);
@@ -124,7 +131,12 @@ namespace vortex
         std::vector<std::function<void()>> m_postQueue;
 
         std::mutex m_sourcesMutex;
-        std::unordered_map<NativeHandle, std::function<void()>> m_sources;
+        struct SourceEntry
+        {
+            std::function<void()> handler;
+            std::function<void()> onError;
+        };
+        std::unordered_map<NativeHandle, SourceEntry> m_sources;
 
         struct TimerEntry
         {

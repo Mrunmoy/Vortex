@@ -865,3 +865,99 @@ TEST(RunLoopTest, RemoveTimerFromHandler)
     std::this_thread::sleep_for(60ms);
     EXPECT_EQ(count.load(), 1);
 }
+
+// ---------- Source Error Callback Tests ----------
+
+TEST(RunLoopTest, ErrorCallbackOnPeerClose)
+{
+    RunLoop loop;
+    loop.init("ErrorCallbackOnPeerClose");
+
+    int fds[2];
+#if defined(_WIN32)
+    GTEST_SKIP() << "Pipe error detection not implemented on Win32";
+#else
+    ASSERT_EQ(pipe(fds), 0);
+    int readFd = fds[0];
+    int writeFd = fds[1];
+#endif
+
+    std::atomic<bool> errorFired{false};
+
+    loop.addSource(
+        readFd,
+        []() {},
+        [&errorFired]() { errorFired.store(true); });
+
+    RunLoopGuard guard(loop);
+    std::this_thread::sleep_for(20ms);
+
+    close(writeFd);
+    std::this_thread::sleep_for(50ms);
+
+    EXPECT_TRUE(errorFired.load());
+
+    close(readFd);
+}
+
+TEST(RunLoopTest, NoErrorCallbackWithoutOnError)
+{
+    RunLoop loop;
+    loop.init("NoErrorCallbackWithoutOnError");
+
+    int fds[2];
+#if defined(_WIN32)
+    GTEST_SKIP() << "Pipe error detection not implemented on Win32";
+#else
+    ASSERT_EQ(pipe(fds), 0);
+    int readFd = fds[0];
+    int writeFd = fds[1];
+#endif
+
+    std::atomic<int> handlerCount{0};
+
+    loop.addSource(readFd, [&handlerCount]() { handlerCount.fetch_add(1); });
+
+    RunLoopGuard guard(loop);
+    std::this_thread::sleep_for(20ms);
+
+    close(writeFd);
+    std::this_thread::sleep_for(50ms);
+
+    EXPECT_GE(handlerCount.load(), 1);
+
+    loop.removeSource(readFd);
+    close(readFd);
+}
+
+TEST(RunLoopTest, ErrorCallbackAutoRemovesSource)
+{
+    RunLoop loop;
+    loop.init("ErrorCallbackAutoRemovesSource");
+
+    int fds[2];
+#if defined(_WIN32)
+    GTEST_SKIP() << "Pipe error detection not implemented on Win32";
+#else
+    ASSERT_EQ(pipe(fds), 0);
+    int readFd = fds[0];
+    int writeFd = fds[1];
+#endif
+
+    std::atomic<int> errorCount{0};
+
+    loop.addSource(
+        readFd,
+        []() {},
+        [&errorCount]() { errorCount.fetch_add(1); });
+
+    RunLoopGuard guard(loop);
+    std::this_thread::sleep_for(20ms);
+
+    close(writeFd);
+    std::this_thread::sleep_for(100ms);
+
+    EXPECT_EQ(errorCount.load(), 1);
+
+    close(readFd);
+}

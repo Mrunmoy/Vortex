@@ -189,6 +189,33 @@ extern "C"
             loop->loop.removeSource(fd);
     }
 
+    int vortex_add_source_with_error(vortex_t loop, int fd,
+                                     vortex_source_cb cb, void *user_data,
+                                     vortex_source_cb on_error, void *error_data)
+    {
+        if (!loop || !cb || fd < 0)
+            return VORTEX_ERR_INVALID_ARGUMENT;
+        if (!loop->initialized)
+            return VORTEX_ERR_NOT_INIT;
+
+        std::function<void()> errorFn;
+        if (on_error)
+            errorFn = [on_error, error_data]() { on_error(error_data); };
+
+        try
+        {
+            loop->loop.addSource(
+                fd,
+                [cb, user_data]() { cb(user_data); },
+                std::move(errorFn));
+            return VORTEX_SUCCESS;
+        }
+        catch (...)
+        {
+            return mapRuntimeError();
+        }
+    }
+
     int vortex_add_timer(vortex_t loop, uint32_t interval_ms, int repeating,
                          vortex_timer_cb cb, void *user_data, uint64_t *out_id)
     {

@@ -153,7 +153,6 @@ namespace vortex
 
                         if (isTimer)
                         {
-                            // Drain the timerfd (read returns number of expirations).
                             uint64_t expirations = 0;
                             [[maybe_unused]] auto r = read(fd, &expirations, sizeof(expirations));
 
@@ -169,17 +168,29 @@ namespace vortex
                         }
                         else
                         {
-                            std::lock_guard<std::mutex> lock(m_sourcesMutex);
-                            auto it = m_sources.find(fd);
-                            if (it != m_sources.end())
-                            {
-                                handler = it->second;
-                            }
-                        }
+                            bool isError = (events[i].events & (EPOLLHUP | EPOLLERR)) != 0;
+                            bool isReadable = (events[i].events & EPOLLIN) != 0;
 
-                        if (!isTimer && handler)
-                        {
-                            handler();
+                            std::function<void()> errorCb;
+                            {
+                                std::lock_guard<std::mutex> lock(m_sourcesMutex);
+                                auto it = m_sources.find(fd);
+                                if (it != m_sources.end())
+                                {
+                                    handler = it->second.handler;
+                                    errorCb = it->second.onError;
+                                }
+                            }
+
+                            if (isError && errorCb)
+                            {
+                                errorCb();
+                                removeSource(fd);
+                            }
+                            else if ((isReadable || (isError && !errorCb)) && handler)
+                            {
+                                handler();
+                            }
                         }
                     }
                 }
@@ -211,6 +222,12 @@ namespace vortex
 
     void RunLoop::addSource(NativeHandle fd, std::function<void()> handler)
     {
+        addSource(fd, std::move(handler), nullptr);
+    }
+
+    void RunLoop::addSource(NativeHandle fd, std::function<void()> handler,
+                            std::function<void()> onError)
+    {
         struct epoll_event ev
         {
         };
@@ -221,18 +238,14 @@ namespace vortex
         auto it = m_sources.find(fd);
         bool alreadyWatched = (it != m_sources.end());
 
-        // Save the previous handler so we can roll back on failure.
-        std::function<void()> previous;
+        SourceEntry previous;
         if (alreadyWatched)
             previous = std::move(it->second);
 
-        m_sources[fd] = std::move(handler);
+        m_sources[fd] = {std::move(handler), std::move(onError)};
         int op = alreadyWatched ? EPOLL_CTL_MOD : EPOLL_CTL_ADD;
         if (epoll_ctl(m_pollFd, op, fd, &ev) != 0)
         {
-            // If the fd was believed to be watched but epoll reports ENOENT,
-            // it was likely auto-removed (e.g. after being closed). In that
-            // case, retry with EPOLL_CTL_ADD to resynchronize our state.
             if (alreadyWatched && errno == ENOENT)
             {
                 op = EPOLL_CTL_ADD;
@@ -259,8 +272,7 @@ namespace vortex
         if (it == m_sources.end())
             return;
 
-        // Save the handler so we can roll back if epoll_ctl fails unexpectedly.
-        std::function<void()> saved = std::move(it->second);
+        SourceEntry saved = std::move(it->second);
         m_sources.erase(it);
 
         if (epoll_ctl(m_pollFd, EPOLL_CTL_DEL, fd, nullptr) != 0)
