@@ -189,6 +189,33 @@ extern "C"
             loop->loop.removeSource(fd);
     }
 
+    int vortex_add_timer(vortex_t loop, uint32_t interval_ms, int repeating,
+                         vortex_timer_cb cb, void *user_data, uint64_t *out_id)
+    {
+        if (!loop || !cb || !out_id)
+            return VORTEX_ERR_INVALID_ARGUMENT;
+        if (!loop->initialized)
+            return VORTEX_ERR_NOT_INIT;
+
+        try
+        {
+            auto id = loop->loop.addTimer(interval_ms, repeating != 0,
+                                          [cb, user_data]() { cb(user_data); });
+            *out_id = id;
+            return VORTEX_SUCCESS;
+        }
+        catch (...)
+        {
+            return mapRuntimeError();
+        }
+    }
+
+    void vortex_remove_timer(vortex_t loop, uint64_t timer_id)
+    {
+        if (loop)
+            loop->loop.removeTimer(timer_id);
+    }
+
     int vortex_is_running(vortex_t loop)
     {
         return (loop && loop->loop.isRunning()) ? 1 : 0;

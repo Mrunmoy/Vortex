@@ -6,6 +6,7 @@
 #include <system_error>
 #include <unistd.h>
 #include <sys/epoll.h>
+#include <sys/timerfd.h>
 
 namespace vortex
 {
@@ -17,6 +18,15 @@ namespace vortex
         if (m_running.load())
         {
             stop();
+        }
+
+        // Close timer fds before closing epoll.
+        for (auto &[id, entry] : m_timers)
+        {
+            if (entry.fd >= 0)
+            {
+                close(entry.fd);
+            }
         }
 
         if (m_wakeupFd[0] >= 0)
@@ -113,23 +123,61 @@ namespace vortex
 
                 for (int i = 0; i < n; ++i)
                 {
-                    if (events[i].data.fd == m_wakeupFd[0])
+                    int fd = events[i].data.fd;
+                    if (fd == m_wakeupFd[0])
                     {
                         char buf[64];
                         while (read(m_wakeupFd[0], buf, sizeof(buf)) > 0) {}
                     }
                     else
                     {
+                        // Check if this fd belongs to a timer.
                         std::function<void()> handler;
+                        bool isTimer = false;
+                        TimerId firedTimerId = 0;
+                        bool oneShot = false;
+                        {
+                            std::lock_guard<std::mutex> lock(m_timersMutex);
+                            for (auto &[tid, entry] : m_timers)
+                            {
+                                if (entry.fd == fd)
+                                {
+                                    isTimer = true;
+                                    firedTimerId = tid;
+                                    oneShot = !entry.repeating;
+                                    handler = entry.handler;
+                                    break;
+                                }
+                            }
+                        }
+
+                        if (isTimer)
+                        {
+                            // Drain the timerfd (read returns number of expirations).
+                            uint64_t expirations = 0;
+                            [[maybe_unused]] auto r = read(fd, &expirations, sizeof(expirations));
+
+                            if (handler)
+                            {
+                                handler();
+                            }
+
+                            if (oneShot)
+                            {
+                                removeTimer(firedTimerId);
+                            }
+                        }
+                        else
                         {
                             std::lock_guard<std::mutex> lock(m_sourcesMutex);
-                            auto it = m_sources.find(events[i].data.fd);
+                            auto it = m_sources.find(fd);
                             if (it != m_sources.end())
                             {
                                 handler = it->second;
                             }
                         }
-                        if (handler)
+
+                        if (!isTimer && handler)
                         {
                             handler();
                         }
@@ -234,6 +282,71 @@ namespace vortex
     {
         char byte = 1;
         [[maybe_unused]] auto r = write(m_wakeupFd[1], &byte, 1);
+    }
+
+    RunLoop::TimerId RunLoop::addTimer(uint32_t intervalMs, bool repeating,
+                                       std::function<void()> handler)
+    {
+        int tfd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
+        if (tfd < 0)
+        {
+            throw std::system_error(errno, std::generic_category(),
+                                    "RunLoop::addTimer: timerfd_create failed");
+        }
+
+        struct itimerspec ts{};
+        ts.it_value.tv_sec = intervalMs / 1000;
+        ts.it_value.tv_nsec = (intervalMs % 1000) * 1000000L;
+        // timerfd disarms when both fields are zero; use 1ns minimum.
+        if (ts.it_value.tv_sec == 0 && ts.it_value.tv_nsec == 0)
+            ts.it_value.tv_nsec = 1;
+        if (repeating)
+        {
+            ts.it_interval = ts.it_value;
+        }
+
+        if (timerfd_settime(tfd, 0, &ts, nullptr) != 0)
+        {
+            int savedErrno = errno;
+            close(tfd);
+            throw std::system_error(savedErrno, std::generic_category(),
+                                    "RunLoop::addTimer: timerfd_settime failed");
+        }
+
+        struct epoll_event ev{};
+        ev.events = EPOLLIN;
+        ev.data.fd = tfd;
+        if (epoll_ctl(m_pollFd, EPOLL_CTL_ADD, tfd, &ev) != 0)
+        {
+            int savedErrno = errno;
+            close(tfd);
+            throw std::system_error(savedErrno, std::generic_category(),
+                                    "RunLoop::addTimer: epoll_ctl failed");
+        }
+
+        TimerId id = m_nextTimerId.fetch_add(1, std::memory_order_relaxed);
+        {
+            std::lock_guard<std::mutex> lock(m_timersMutex);
+            m_timers[id] = {intervalMs, repeating, std::move(handler), tfd};
+        }
+        return id;
+    }
+
+    void RunLoop::removeTimer(TimerId id)
+    {
+        std::lock_guard<std::mutex> lock(m_timersMutex);
+        auto it = m_timers.find(id);
+        if (it == m_timers.end())
+            return;
+
+        int tfd = it->second.fd;
+        m_timers.erase(it);
+
+        if (tfd >= 0)
+        {
+            epoll_ctl(m_pollFd, EPOLL_CTL_DEL, tfd, nullptr);
+            close(tfd);
+        }
     }
 
 } // namespace vortex

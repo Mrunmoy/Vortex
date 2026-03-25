@@ -698,3 +698,170 @@ TEST(RunLoopTest, AddSourceFromAnyThread)
     loop.removeSource(readFd);
     closePipe(readFd, writeFd);
 }
+
+// ═════════════════════════════════════════════════════════════════════
+// One-shot timer fires once and is auto-removed.
+// ═════════════════════════════════════════════════════════════════════
+
+TEST(RunLoopTest, OneShotTimer)
+{
+    RunLoop loop;
+    loop.init("OneShot");
+
+    std::atomic<int> count{0};
+    auto id = loop.addTimer(20, false, [&] { count.fetch_add(1); });
+    (void)id;
+
+    RunLoopGuard guard(loop);
+
+    for (int i = 0; i < 200 && count.load() < 1; ++i)
+        std::this_thread::sleep_for(5ms);
+
+    EXPECT_EQ(count.load(), 1);
+
+    // Wait a bit more — should not fire again.
+    std::this_thread::sleep_for(50ms);
+    EXPECT_EQ(count.load(), 1);
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// Repeating timer fires multiple times.
+// ═════════════════════════════════════════════════════════════════════
+
+TEST(RunLoopTest, RepeatingTimer)
+{
+    RunLoop loop;
+    loop.init("Repeat");
+
+    std::atomic<int> count{0};
+    auto id = loop.addTimer(15, true, [&] { count.fetch_add(1); });
+
+    RunLoopGuard guard(loop);
+
+    for (int i = 0; i < 400 && count.load() < 3; ++i)
+        std::this_thread::sleep_for(5ms);
+
+    EXPECT_GE(count.load(), 3);
+
+    loop.removeTimer(id);
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// removeTimer() cancels a repeating timer.
+// ═════════════════════════════════════════════════════════════════════
+
+TEST(RunLoopTest, RemoveTimerStopsFiring)
+{
+    RunLoop loop;
+    loop.init("RemoveTimer");
+
+    std::atomic<int> count{0};
+    auto id = loop.addTimer(10, true, [&] { count.fetch_add(1); });
+
+    RunLoopGuard guard(loop);
+
+    for (int i = 0; i < 200 && count.load() < 1; ++i)
+        std::this_thread::sleep_for(5ms);
+
+    EXPECT_GE(count.load(), 1);
+
+    loop.removeTimer(id);
+    int snapshot = count.load();
+
+    std::this_thread::sleep_for(80ms);
+    EXPECT_EQ(count.load(), snapshot);
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// Timer handler runs on the loop thread.
+// ═════════════════════════════════════════════════════════════════════
+
+TEST(RunLoopTest, TimerHandlerRunsOnLoopThread)
+{
+    RunLoop loop;
+    loop.init("TimerThread");
+
+    std::thread::id loopThreadId;
+    std::thread::id timerThreadId;
+    std::atomic<bool> done{false};
+
+    std::thread t([&] {
+        loopThreadId = std::this_thread::get_id();
+        loop.run();
+    });
+
+    for (int i = 0; i < 100 && !loop.isRunning(); ++i)
+        std::this_thread::sleep_for(5ms);
+
+    auto id = loop.addTimer(10, false, [&] {
+        timerThreadId = std::this_thread::get_id();
+        done.store(true);
+    });
+    (void)id;
+
+    for (int i = 0; i < 200 && !done.load(); ++i)
+        std::this_thread::sleep_for(5ms);
+
+    EXPECT_TRUE(done.load());
+    EXPECT_EQ(timerThreadId, loopThreadId);
+
+    loop.stop();
+    t.join();
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// Multiple timers with different intervals fire independently.
+// ═════════════════════════════════════════════════════════════════════
+
+TEST(RunLoopTest, MultipleTimers)
+{
+    RunLoop loop;
+    loop.init("MultiTimer");
+
+    std::atomic<int> fastCount{0};
+    std::atomic<int> slowCount{0};
+
+    auto fast = loop.addTimer(10, true, [&] { fastCount.fetch_add(1); });
+    auto slow = loop.addTimer(50, true, [&] { slowCount.fetch_add(1); });
+
+    RunLoopGuard guard(loop);
+
+    // Wait for slow timer to fire at least twice.
+    for (int i = 0; i < 400 && slowCount.load() < 2; ++i)
+        std::this_thread::sleep_for(5ms);
+
+    EXPECT_GE(slowCount.load(), 2);
+    EXPECT_GT(fastCount.load(), slowCount.load());
+
+    loop.removeTimer(fast);
+    loop.removeTimer(slow);
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// removeTimer() from within a timer handler (self-cancel).
+// ═════════════════════════════════════════════════════════════════════
+
+TEST(RunLoopTest, RemoveTimerFromHandler)
+{
+    RunLoop loop;
+    loop.init("SelfCancel");
+
+    std::atomic<int> count{0};
+    RunLoop::TimerId timerId = 0;
+
+    timerId = loop.addTimer(15, true, [&] {
+        count.fetch_add(1);
+        loop.removeTimer(timerId);
+    });
+
+    RunLoopGuard guard(loop);
+
+    for (int i = 0; i < 200 && count.load() < 1; ++i)
+        std::this_thread::sleep_for(5ms);
+
+    EXPECT_EQ(count.load(), 1);
+
+    // Wait — should not fire again.
+    std::this_thread::sleep_for(60ms);
+    EXPECT_EQ(count.load(), 1);
+}

@@ -119,18 +119,42 @@ namespace vortex
 
                 for (int i = 0; i < n; ++i)
                 {
-                    int fd = static_cast<int>(events[i].ident);
-                    if (fd == m_wakeupFd[0])
+                    int ident = static_cast<int>(events[i].ident);
+                    if (ident == m_wakeupFd[0])
                     {
                         char buf[64];
                         while (read(m_wakeupFd[0], buf, sizeof(buf)) > 0) {}
+                    }
+                    else if (events[i].filter == EVFILT_TIMER)
+                    {
+                        // Timer event — ident is the TimerId.
+                        TimerId tid = static_cast<TimerId>(events[i].ident);
+                        std::function<void()> handler;
+                        bool oneShot = false;
+                        {
+                            std::lock_guard<std::mutex> lock(m_timersMutex);
+                            auto it = m_timers.find(tid);
+                            if (it != m_timers.end())
+                            {
+                                handler = it->second.handler;
+                                oneShot = !it->second.repeating;
+                            }
+                        }
+                        if (handler)
+                        {
+                            handler();
+                        }
+                        if (oneShot)
+                        {
+                            removeTimer(tid);
+                        }
                     }
                     else
                     {
                         std::function<void()> handler;
                         {
                             std::lock_guard<std::mutex> lock(m_sourcesMutex);
-                            auto it = m_sources.find(fd);
+                            auto it = m_sources.find(ident);
                             if (it != m_sources.end())
                             {
                                 handler = it->second;
@@ -226,6 +250,49 @@ namespace vortex
     {
         char byte = 1;
         [[maybe_unused]] auto r = write(m_wakeupFd[1], &byte, 1);
+    }
+
+    RunLoop::TimerId RunLoop::addTimer(uint32_t intervalMs, bool repeating,
+                                       std::function<void()> handler)
+    {
+        TimerId id = m_nextTimerId.fetch_add(1, std::memory_order_relaxed);
+
+        uint16_t flags = EV_ADD;
+        if (!repeating)
+        {
+            flags |= EV_ONESHOT;
+        }
+
+        struct kevent ev;
+        EV_SET(&ev, static_cast<uintptr_t>(id), EVFILT_TIMER, flags,
+               NOTE_USECONDS, static_cast<int64_t>(intervalMs) * 1000, nullptr);
+
+        if (kevent(m_pollFd, &ev, 1, nullptr, 0, nullptr) != 0)
+        {
+            throw std::system_error(errno, std::generic_category(),
+                                    "RunLoop::addTimer: kevent failed");
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(m_timersMutex);
+            m_timers[id] = {intervalMs, repeating, std::move(handler)};
+        }
+        return id;
+    }
+
+    void RunLoop::removeTimer(TimerId id)
+    {
+        std::lock_guard<std::mutex> lock(m_timersMutex);
+        auto it = m_timers.find(id);
+        if (it == m_timers.end())
+            return;
+
+        m_timers.erase(it);
+
+        struct kevent ev;
+        EV_SET(&ev, static_cast<uintptr_t>(id), EVFILT_TIMER, EV_DELETE, 0, 0, nullptr);
+        // Ignore errors — timer may have already been removed (one-shot).
+        kevent(m_pollFd, &ev, 1, nullptr, 0, nullptr);
     }
 
 } // namespace vortex
