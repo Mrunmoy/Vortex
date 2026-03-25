@@ -31,6 +31,15 @@ namespace vortex
             stop();
         }
 
+        // Close timer handles.
+        for (auto &[id, entry] : m_timers)
+        {
+            if (entry.handle != nullptr)
+            {
+                CloseHandle(entry.handle);
+            }
+        }
+
         if (m_wakeupHandle != nullptr)
         {
             CloseHandle(m_wakeupHandle);
@@ -98,14 +107,26 @@ namespace vortex
                     }
                 }
 
-                // Build wait array: wakeup event + all registered source handles.
+                // Build wait array: wakeup event + source handles + timer handles.
                 std::vector<HANDLE> handles;
+                std::vector<TimerId> timerIds;
                 handles.push_back(m_wakeupHandle);
                 {
                     std::lock_guard<std::mutex> lock(m_sourcesMutex);
                     for (auto &[h, _] : m_sources)
                     {
                         handles.push_back(static_cast<HANDLE>(h));
+                    }
+                }
+                {
+                    std::lock_guard<std::mutex> lock(m_timersMutex);
+                    for (auto &[tid, entry] : m_timers)
+                    {
+                        if (entry.handle != nullptr)
+                        {
+                            handles.push_back(entry.handle);
+                            timerIds.push_back(tid);
+                        }
                     }
                 }
 
@@ -130,18 +151,52 @@ namespace vortex
                     else
                     {
                         HANDLE signalled = handles[idx];
+
+                        // Check if it's a timer handle.
                         std::function<void()> handler;
+                        bool isTimer = false;
+                        TimerId firedTimerId = 0;
+                        bool oneShot = false;
                         {
-                            std::lock_guard<std::mutex> lock(m_sourcesMutex);
-                            auto it = m_sources.find(signalled);
-                            if (it != m_sources.end())
+                            std::lock_guard<std::mutex> lock(m_timersMutex);
+                            for (auto &[tid, entry] : m_timers)
                             {
-                                handler = it->second;
+                                if (entry.handle == signalled)
+                                {
+                                    isTimer = true;
+                                    firedTimerId = tid;
+                                    oneShot = !entry.repeating;
+                                    handler = entry.handler;
+                                    break;
+                                }
                             }
                         }
-                        if (handler)
+
+                        if (isTimer)
                         {
-                            handler();
+                            if (handler)
+                            {
+                                handler();
+                            }
+                            if (oneShot)
+                            {
+                                removeTimer(firedTimerId);
+                            }
+                        }
+                        else
+                        {
+                            {
+                                std::lock_guard<std::mutex> lock(m_sourcesMutex);
+                                auto it = m_sources.find(signalled);
+                                if (it != m_sources.end())
+                                {
+                                    handler = it->second;
+                                }
+                            }
+                            if (handler)
+                            {
+                                handler();
+                            }
                         }
                     }
                 }
@@ -197,6 +252,58 @@ namespace vortex
         {
             SetEvent(m_wakeupHandle);
         }
+    }
+
+    RunLoop::TimerId RunLoop::addTimer(uint32_t intervalMs, bool repeating,
+                                       std::function<void()> handler)
+    {
+        HANDLE timerHandle = CreateWaitableTimerA(nullptr, FALSE, nullptr);
+        if (timerHandle == nullptr)
+        {
+            throw std::system_error(static_cast<int>(GetLastError()),
+                                    std::system_category(),
+                                    "RunLoop::addTimer: CreateWaitableTimer failed");
+        }
+
+        // Due time is negative for relative time (in 100ns intervals).
+        LARGE_INTEGER dueTime;
+        dueTime.QuadPart = -static_cast<LONGLONG>(intervalMs) * 10000LL;
+        LONG period = repeating ? static_cast<LONG>(intervalMs) : 0;
+
+        if (!SetWaitableTimer(timerHandle, &dueTime, period, nullptr, nullptr, FALSE))
+        {
+            DWORD err = GetLastError();
+            CloseHandle(timerHandle);
+            throw std::system_error(static_cast<int>(err),
+                                    std::system_category(),
+                                    "RunLoop::addTimer: SetWaitableTimer failed");
+        }
+
+        TimerId id = m_nextTimerId.fetch_add(1, std::memory_order_relaxed);
+        {
+            std::lock_guard<std::mutex> lock(m_timersMutex);
+            m_timers[id] = {intervalMs, repeating, std::move(handler), timerHandle};
+        }
+        wakeup();
+        return id;
+    }
+
+    void RunLoop::removeTimer(TimerId id)
+    {
+        std::lock_guard<std::mutex> lock(m_timersMutex);
+        auto it = m_timers.find(id);
+        if (it == m_timers.end())
+            return;
+
+        HANDLE h = it->second.handle;
+        m_timers.erase(it);
+
+        if (h != nullptr)
+        {
+            CancelWaitableTimer(h);
+            CloseHandle(h);
+        }
+        wakeup();
     }
 
 } // namespace vortex

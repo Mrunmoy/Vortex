@@ -316,3 +316,68 @@ TEST(CApiTest, FreeNull)
     vortex_free(nullptr);
     SUCCEED();
 }
+
+TEST(CApiTest, OneShotTimer)
+{
+    VortexGuard guard;
+    ASSERT_EQ(vortex_init(guard.loop, "CTimer"), VORTEX_SUCCESS);
+
+    std::atomic<int> count{0};
+    auto cb = [](void *userData) {
+        static_cast<std::atomic<int> *>(userData)->fetch_add(1);
+    };
+
+    uint64_t timerId = 0;
+    ASSERT_EQ(vortex_add_timer(guard.loop, 20, 0, cb, &count, &timerId), VORTEX_SUCCESS);
+    EXPECT_GE(timerId, 1u);
+
+    std::thread t([&] { EXPECT_EQ(vortex_run(guard.loop), VORTEX_SUCCESS); });
+
+    for (int i = 0; i < 200 && count.load() < 1; ++i)
+        std::this_thread::sleep_for(5ms);
+
+    EXPECT_EQ(count.load(), 1);
+
+    std::this_thread::sleep_for(50ms);
+    EXPECT_EQ(count.load(), 1);
+
+    vortex_stop(guard.loop);
+    t.join();
+}
+
+TEST(CApiTest, RepeatingTimer)
+{
+    VortexGuard guard;
+    ASSERT_EQ(vortex_init(guard.loop, "CRepeat"), VORTEX_SUCCESS);
+
+    std::atomic<int> count{0};
+    auto cb = [](void *userData) {
+        static_cast<std::atomic<int> *>(userData)->fetch_add(1);
+    };
+
+    uint64_t timerId = 0;
+    ASSERT_EQ(vortex_add_timer(guard.loop, 15, 1, cb, &count, &timerId), VORTEX_SUCCESS);
+
+    std::thread t([&] { EXPECT_EQ(vortex_run(guard.loop), VORTEX_SUCCESS); });
+
+    for (int i = 0; i < 400 && count.load() < 3; ++i)
+        std::this_thread::sleep_for(5ms);
+
+    EXPECT_GE(count.load(), 3);
+
+    vortex_remove_timer(guard.loop, timerId);
+    vortex_stop(guard.loop);
+    t.join();
+}
+
+TEST(CApiTest, TimerNullGuards)
+{
+    EXPECT_EQ(vortex_add_timer(nullptr, 100, 0, nullptr, nullptr, nullptr),
+              VORTEX_ERR_INVALID_ARGUMENT);
+    vortex_remove_timer(nullptr, 1);
+
+    VortexGuard guard;
+    uint64_t timerId = 0;
+    EXPECT_EQ(vortex_add_timer(guard.loop, 100, 0, [](void *) {}, nullptr, &timerId),
+              VORTEX_ERR_NOT_INIT);
+}

@@ -59,3 +59,9 @@ coverage/
 
 # Valgrind
 vgcore.*
+
+# SDK packaging artifacts
+dist/
+vortex-sdk-*
+*.tar.gz
+CODEX_INSTRUCTIONS.md

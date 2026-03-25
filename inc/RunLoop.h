@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <mutex>
@@ -29,10 +30,12 @@ namespace vortex
         using NativeHandle = int;
 #endif
 
+        using TimerId = uint64_t;
+
         struct Version
         {
             static constexpr uint8_t major = 1;
-            static constexpr uint8_t minor = 1;
+            static constexpr uint8_t minor = 2;
             static constexpr uint8_t patch = 0;
             static constexpr uint32_t packed = (major << 16) | (minor << 8) | patch;
         };
@@ -80,6 +83,18 @@ namespace vortex
         // Throws std::system_error on unexpected failure.
         void removeSource(NativeHandle handle);
 
+        // Schedule a timer. `handler` is called on the run loop thread
+        // after `intervalMs` milliseconds. If `repeating` is true, the
+        // timer fires repeatedly at that interval until removed.
+        // Returns a TimerId that can be passed to removeTimer().
+        // Thread-safe — can be called from any thread.
+        TimerId addTimer(uint32_t intervalMs, bool repeating,
+                         std::function<void()> handler);
+
+        // Cancel a previously scheduled timer. Thread-safe.
+        // No-op if the timer has already been removed or fired (one-shot).
+        void removeTimer(TimerId id);
+
         bool isRunning() const { return m_running.load(std::memory_order_acquire); }
         const char *name() const { return m_name.c_str(); }
 
@@ -110,6 +125,24 @@ namespace vortex
 
         std::mutex m_sourcesMutex;
         std::unordered_map<NativeHandle, std::function<void()>> m_sources;
+
+        struct TimerEntry
+        {
+            uint32_t intervalMs;
+            bool repeating;
+            std::function<void()> handler;
+#if defined(__linux__)
+            int fd = -1;
+#elif defined(_WIN32)
+            void *handle = nullptr;
+#elif !defined(__APPLE__)
+            std::chrono::steady_clock::time_point nextFire;
+#endif
+        };
+
+        std::mutex m_timersMutex;
+        std::unordered_map<TimerId, TimerEntry> m_timers;
+        std::atomic<TimerId> m_nextTimerId{1};
     };
 
 } // namespace vortex
