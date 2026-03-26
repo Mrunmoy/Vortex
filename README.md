@@ -1,6 +1,9 @@
 # Vortex
 
 [![Build](https://github.com/Mrunmoy/Vortex/actions/workflows/ci.yml/badge.svg)](https://github.com/Mrunmoy/Vortex/actions/workflows/ci.yml)
+[![Pages](https://github.com/Mrunmoy/Vortex/actions/workflows/pages.yml/badge.svg)](https://github.com/Mrunmoy/Vortex/actions/workflows/pages.yml)
+[![Coverage](https://img.shields.io/endpoint?url=https://mrunmoy.github.io/Vortex/badges/coverage.json)](https://mrunmoy.github.io/Vortex/coverage/)
+[![Dashboard](https://img.shields.io/badge/Dashboard-Live-darkblue?style=flat)](https://mrunmoy.github.io/Vortex/)
 
 Cross-platform event loop for C++17 with thread-safe callable posting.
 

@@ -1,0 +1,91 @@
+name: Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ── Code coverage ──────────────────────────────────────────────────
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Configure (coverage build)
+        run: |
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_CXX_FLAGS="--coverage -fprofile-arcs -ftest-coverage"
+
+      - name: Build
+        run: cmake --build build -j$(nproc)
+
+      - name: Run tests
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Generate coverage report
+        run: |
+          LCOV_OPTS="--rc branch_coverage=1 --ignore-errors mismatch,negative"
+          lcov --capture --directory build --output-file coverage.info $LCOV_OPTS
+          lcov --remove coverage.info '/usr/*' '*/vendor/*' '*/test/*' \
+            --output-file coverage.info $LCOV_OPTS
+          genhtml coverage.info --output-directory coverage_html \
+            --branch-coverage --title "Vortex" --legend \
+            --ignore-errors mismatch,negative
+
+          # Extract line coverage percentage
+          PCT=$(lcov --summary coverage.info 2>&1 | grep 'lines' | sed 's/.*: \([0-9.]*\)%.*/\1/')
+          echo "$PCT" > coverage_pct.txt
+          echo "Line coverage: ${PCT}%"
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: |
+            coverage_html/
+            coverage_pct.txt
+
+  # ── Deploy to GitHub Pages ─────────────────────────────────────────
+  deploy:
+    needs: [coverage]
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Generate Pages content
+        run: |
+          ARTIFACT_DIR=artifacts OUT_DIR=public python3 scripts/generate_pages.py
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
