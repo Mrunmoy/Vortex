@@ -79,7 +79,7 @@ def clean():
         print(">>> Nothing to clean")
 
 
-def configure(examples=False):
+def configure(examples=False, benchmarks=False):
     os.makedirs(BUILD_DIR, exist_ok=True)
     cmd = [
         "cmake",
@@ -89,6 +89,8 @@ def configure(examples=False):
     ]
     if examples:
         cmd.append("-DVORTEX_BUILD_EXAMPLES=ON")
+    if benchmarks:
+        cmd.append("-DVORTEX_BUILD_BENCHMARKS=ON")
     run(cmd, cwd=SCRIPT_DIR)
 
 
@@ -203,18 +205,27 @@ def main():
     parser.add_argument("-t", "--test", action="store_true", help="Build and run tests")
     parser.add_argument("-e", "--examples", action="store_true", help="Build examples")
     parser.add_argument("-p", "--package", action="store_true", help="Install and package the SDK")
+    parser.add_argument("-b", "--benchmarks", action="store_true", help="Build benchmarks")
+    parser.add_argument("--run-bench", action="store_true", help="Run benchmarks after build")
     args = parser.parse_args()
 
     if args.clean:
         clean()
-        if not args.test and not args.examples and not args.package:
+        if not args.test and not args.examples and not args.package and not args.benchmarks and not args.run_bench:
             return
 
-    configure(examples=args.examples)
+    configure(examples=args.examples, benchmarks=args.benchmarks)
     build()
 
     if args.test:
         test()
+    if args.run_bench:
+        bench_bin = os.path.join(BUILD_DIR, "bench", "vortex_benchmarks")
+        if os.path.isfile(bench_bin):
+            run([bench_bin])
+        else:
+            print(">>> Benchmark binary not found. Build with -b first.")
+            sys.exit(1)
     if args.package:
         package_sdk()
 

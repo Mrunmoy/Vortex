@@ -13,6 +13,37 @@ permissions:
   contents: read
 
 jobs:
+  # ── Benchmarks ─────────────────────────────────────────────────────
+  benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install competitor libraries
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y libuv1-dev libevent-dev libboost-system-dev
+
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DVORTEX_BUILD_BENCHMARKS=ON
+
+      - name: Build
+        run: cmake --build build -j$(nproc)
+
+      - name: Run benchmarks
+        run: |
+          ./build/bench/vortex_benchmarks \
+            --benchmark_format=json \
+            --benchmark_out=bench_results.json
+
+      - name: Upload benchmark artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark
+          path: bench_results.json
+
   # ── Code coverage ──────────────────────────────────────────────────
   coverage:
     runs-on: ubuntu-latest
@@ -46,7 +77,6 @@ jobs:
             --branch-coverage --title "Vortex" --legend \
             --ignore-errors mismatch,negative
 
-          # Extract line coverage percentage
           PCT=$(lcov --summary coverage.info 2>&1 | grep 'lines' | sed 's/.*: \([0-9.]*\)%.*/\1/')
           echo "$PCT" > coverage_pct.txt
           echo "Line coverage: ${PCT}%"
@@ -61,7 +91,7 @@ jobs:
 
   # ── Deploy to GitHub Pages ─────────────────────────────────────────
   deploy:
-    needs: [coverage]
+    needs: [benchmark, coverage]
     runs-on: ubuntu-latest
     permissions:
       pages: write
