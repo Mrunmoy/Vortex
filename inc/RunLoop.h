@@ -83,6 +83,11 @@ namespace vortex
         /// `onError` fires on the run-loop thread when the source hits an
         /// error or hangup (EPOLLHUP/EPOLLERR on Linux, EV_EOF on macOS).
         /// The source is automatically removed after `onError` fires.
+        ///
+        /// **Win32 WFMO limitation:** WaitForMultipleObjects cannot
+        /// distinguish data-ready from error/hangup, so neither `onError`
+        /// nor auto-removal occurs on the WFMO backend.  Full error-callback
+        /// support requires the planned IOCP backend (Phase 5c).
         void addSource(NativeHandle handle, std::function<void()> handler,
                        std::function<void()> onError);
 
