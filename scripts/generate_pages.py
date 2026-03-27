@@ -347,7 +347,7 @@ def generate_index(has_coverage, coverage_pct, bench_data):
       </tr>
       <tr>
         <td class="row-label">Best for</td>
-        <td>Embedded, RTOS, IPC, lightweight services</td>
+        <td>IPC, lightweight services, latency-sensitive daemons</td>
         <td>General-purpose async I/O, Node.js addons</td>
         <td>Network servers, proxies</td>
         <td>Complex async C++ applications, protocol stacks</td>
@@ -374,8 +374,8 @@ def generate_index(has_coverage, coverage_pct, bench_data):
         <div class="stat"><span class="stat-val">312 B</span><span class="stat-label">RAM per instance</span></div>
         <div class="stat"><span class="stat-val">0</span><span class="stat-label">heap allocs at init</span></div>
       </div>
-      <p>Designed for environments where every kilobyte counts &mdash; RTOS,
-      microcontrollers, safety-critical systems, and latency-sensitive services.
+      <p>Designed for environments where every kilobyte counts &mdash;
+      latency-sensitive services, IPC layers, and resource-constrained Linux targets.
       No dynamic linking, no transitive dependencies, no hidden allocations.</p>
     </div>
     <div class="card">
