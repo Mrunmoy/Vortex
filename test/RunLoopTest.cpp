@@ -4,6 +4,7 @@
 #include <atomic>
 #include <chrono>
 #include <stdexcept>
+#include <gmock/gmock.h>
 #include <thread>
 
 #if defined(_WIN32)
@@ -409,6 +410,9 @@ static void closePipe(Handle, Handle) {}
 
 TEST(RunLoopTest, AddAndRemoveSource)
 {
+#if defined(_WIN32)
+    GTEST_SKIP() << "CreatePipe handles are not waitable by WaitForMultipleObjects";
+#endif
     RunLoop loop;
     loop.init("AddRemove");
 
@@ -447,6 +451,9 @@ TEST(RunLoopTest, AddAndRemoveSource)
 
 TEST(RunLoopTest, SourceCallbackRunsOnLoopThread)
 {
+#if defined(_WIN32)
+    GTEST_SKIP() << "CreatePipe handles are not waitable by WaitForMultipleObjects";
+#endif
     RunLoop loop;
     loop.init("SourceThread");
 
@@ -490,6 +497,9 @@ TEST(RunLoopTest, SourceCallbackRunsOnLoopThread)
 
 TEST(RunLoopTest, MultipleSourcesConcurrent)
 {
+#if defined(_WIN32)
+    GTEST_SKIP() << "CreatePipe handles are not waitable by WaitForMultipleObjects";
+#endif
     RunLoop loop;
     loop.init("MultiSource");
 
@@ -537,6 +547,9 @@ TEST(RunLoopTest, MultipleSourcesConcurrent)
 
 TEST(RunLoopTest, RemoveSourceFromHandler)
 {
+#if defined(_WIN32)
+    GTEST_SKIP() << "CreatePipe handles are not waitable by WaitForMultipleObjects";
+#endif
     RunLoop loop;
     loop.init("SelfRemove");
 
@@ -574,6 +587,9 @@ TEST(RunLoopTest, RemoveSourceFromHandler)
 
 TEST(RunLoopTest, UpdateSourceHandler)
 {
+#if defined(_WIN32)
+    GTEST_SKIP() << "CreatePipe handles are not waitable by WaitForMultipleObjects";
+#endif
     RunLoop loop;
     loop.init("UpdateSource");
 
@@ -668,6 +684,9 @@ TEST(RunLoopTest, ExceptionFromCallablePropagatesToRun)
 
 TEST(RunLoopTest, AddSourceFromAnyThread)
 {
+#if defined(_WIN32)
+    GTEST_SKIP() << "CreatePipe handles are not waitable by WaitForMultipleObjects";
+#endif
     RunLoop loop;
     loop.init("ThreadAdd");
 
@@ -697,6 +716,221 @@ TEST(RunLoopTest, AddSourceFromAnyThread)
 
     loop.removeSource(readFd);
     closePipe(readFd, writeFd);
+}
+
+// ═════════════════════════════════════════════════════════════════════
+// B1: WFMO slot budget — Win32-only capacity checks.
+//
+// WaitForMultipleObjects has a 64-handle limit. The WFMO array is
+// 1 (wakeup) + sources + timers, so at most 63 user slots.
+// These tests verify addSource()/addTimer() reject overflows.
+// ═════════════════════════════════════════════════════════════════════
+
+TEST(RunLoopTest, AddSourceRejectsWhenSlotsFull)
+{
+#if !defined(_WIN32)
+    GTEST_SKIP() << "WFMO slot limit is Win32-only";
+#else
+    RunLoop loop;
+    loop.init("SlotFullSrc");
+
+    std::vector<HANDLE> events;
+    auto cleanup = [&] {
+        for (auto h : events)
+        {
+            loop.removeSource(static_cast<RunLoop::NativeHandle>(h));
+            CloseHandle(h);
+        }
+    };
+
+    for (int i = 0; i < 63; ++i)
+    {
+        HANDLE ev = CreateEventA(nullptr, FALSE, FALSE, nullptr);
+        ASSERT_NE(ev, nullptr) << "CreateEvent failed at " << i;
+        events.push_back(ev);
+        ASSERT_NO_THROW(loop.addSource(static_cast<RunLoop::NativeHandle>(ev), [] {}));
+    }
+
+    HANDLE overflow = CreateEventA(nullptr, FALSE, FALSE, nullptr);
+    ASSERT_NE(overflow, nullptr);
+
+    EXPECT_THROW(
+        loop.addSource(static_cast<RunLoop::NativeHandle>(overflow), [] {}),
+        std::runtime_error);
+
+    CloseHandle(overflow);
+    cleanup();
+#endif
+}
+
+TEST(RunLoopTest, AddTimerRejectsWhenSlotsFull)
+{
+#if !defined(_WIN32)
+    GTEST_SKIP() << "WFMO slot limit is Win32-only";
+#else
+    RunLoop loop;
+    loop.init("SlotFullTmr");
+
+    std::vector<RunLoop::TimerId> ids;
+    for (int i = 0; i < 63; ++i)
+    {
+        RunLoop::TimerId tid = 0;
+        ASSERT_NO_THROW(tid = loop.addTimer(10000, false, [] {}));
+        ids.push_back(tid);
+    }
+
+    EXPECT_THROW(loop.addTimer(10000, false, [] {}), std::runtime_error);
+
+    for (auto tid : ids)
+        loop.removeTimer(tid);
+#endif
+}
+
+TEST(RunLoopTest, CombinedSourceTimerSlotLimit)
+{
+#if !defined(_WIN32)
+    GTEST_SKIP() << "WFMO slot limit is Win32-only";
+#else
+    RunLoop loop;
+    loop.init("SlotCombo");
+
+    std::vector<HANDLE> events;
+    std::vector<RunLoop::TimerId> timerIds;
+    auto cleanup = [&] {
+        for (auto h : events)
+        {
+            loop.removeSource(static_cast<RunLoop::NativeHandle>(h));
+            CloseHandle(h);
+        }
+        for (auto tid : timerIds)
+            loop.removeTimer(tid);
+    };
+
+    // 32 sources + 31 timers = 63 slots.
+    for (int i = 0; i < 32; ++i)
+    {
+        HANDLE ev = CreateEventA(nullptr, FALSE, FALSE, nullptr);
+        ASSERT_NE(ev, nullptr);
+        events.push_back(ev);
+        ASSERT_NO_THROW(loop.addSource(static_cast<RunLoop::NativeHandle>(ev), [] {}));
+    }
+    for (int i = 0; i < 31; ++i)
+    {
+        RunLoop::TimerId tid = 0;
+        ASSERT_NO_THROW(tid = loop.addTimer(10000, false, [] {}));
+        timerIds.push_back(tid);
+    }
+
+    // Next source must fail.
+    HANDLE overflow = CreateEventA(nullptr, FALSE, FALSE, nullptr);
+    ASSERT_NE(overflow, nullptr);
+    EXPECT_THROW(
+        loop.addSource(static_cast<RunLoop::NativeHandle>(overflow), [] {}),
+        std::runtime_error);
+    CloseHandle(overflow);
+
+    // Next timer must also fail.
+    EXPECT_THROW(loop.addTimer(10000, false, [] {}), std::runtime_error);
+
+    cleanup();
+#endif
+}
+
+TEST(RunLoopTest, SourceAfterTimerRemovalSucceeds)
+{
+#if !defined(_WIN32)
+    GTEST_SKIP() << "WFMO slot limit is Win32-only";
+#else
+    RunLoop loop;
+    loop.init("SlotFree");
+
+    std::vector<HANDLE> events;
+    std::vector<RunLoop::TimerId> timerIds;
+    auto cleanup = [&] {
+        for (auto h : events)
+        {
+            loop.removeSource(static_cast<RunLoop::NativeHandle>(h));
+            CloseHandle(h);
+        }
+        for (auto tid : timerIds)
+            loop.removeTimer(tid);
+    };
+
+    // Fill: 30 sources + 33 timers = 63.
+    for (int i = 0; i < 30; ++i)
+    {
+        HANDLE ev = CreateEventA(nullptr, FALSE, FALSE, nullptr);
+        ASSERT_NE(ev, nullptr);
+        events.push_back(ev);
+        ASSERT_NO_THROW(loop.addSource(static_cast<RunLoop::NativeHandle>(ev), [] {}));
+    }
+    for (int i = 0; i < 33; ++i)
+    {
+        RunLoop::TimerId tid = 0;
+        ASSERT_NO_THROW(tid = loop.addTimer(10000, false, [] {}));
+        timerIds.push_back(tid);
+    }
+
+    // At capacity — next add should fail.
+    HANDLE overflow = CreateEventA(nullptr, FALSE, FALSE, nullptr);
+    ASSERT_NE(overflow, nullptr);
+    EXPECT_THROW(
+        loop.addSource(static_cast<RunLoop::NativeHandle>(overflow), [] {}),
+        std::runtime_error);
+
+    // Free one timer slot.
+    loop.removeTimer(timerIds.back());
+    timerIds.pop_back();
+
+    // Now add should succeed (30 + 32 = 62 < 63).
+    events.push_back(overflow);
+    EXPECT_NO_THROW(
+        loop.addSource(static_cast<RunLoop::NativeHandle>(overflow), [] {}));
+
+    cleanup();
+#endif
+}
+
+TEST(RunLoopTest, ReplaceSourceDoesNotConsumeSlot)
+{
+#if !defined(_WIN32)
+    GTEST_SKIP() << "WFMO slot limit is Win32-only";
+#else
+    RunLoop loop;
+    loop.init("ReplaceSlot");
+
+    std::vector<HANDLE> events;
+    auto cleanup = [&] {
+        for (auto h : events)
+        {
+            loop.removeSource(static_cast<RunLoop::NativeHandle>(h));
+            CloseHandle(h);
+        }
+    };
+
+    // Fill all 63 source slots.
+    for (int i = 0; i < 63; ++i)
+    {
+        HANDLE ev = CreateEventA(nullptr, TRUE, FALSE, nullptr);
+        ASSERT_NE(ev, nullptr);
+        events.push_back(ev);
+        ASSERT_NO_THROW(loop.addSource(static_cast<RunLoop::NativeHandle>(ev), [] {}));
+    }
+
+    // Replacing an existing handle must succeed — it reuses the slot.
+    ASSERT_NO_THROW(
+        loop.addSource(static_cast<RunLoop::NativeHandle>(events[0]), [] {}));
+
+    // A truly new handle must still be rejected.
+    HANDLE extra = CreateEventA(nullptr, TRUE, FALSE, nullptr);
+    ASSERT_NE(extra, nullptr);
+    EXPECT_THROW(
+        loop.addSource(static_cast<RunLoop::NativeHandle>(extra), [] {}),
+        std::runtime_error);
+    CloseHandle(extra);
+
+    cleanup();
+#endif
 }
 
 // ═════════════════════════════════════════════════════════════════════

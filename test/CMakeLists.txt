@@ -17,7 +17,7 @@ add_executable(runloop_tests
     RunLoopTest.cpp
 )
 find_package(Threads REQUIRED)
-target_link_libraries(runloop_tests PRIVATE vortex GTest::gtest_main Threads::Threads)
+target_link_libraries(runloop_tests PRIVATE vortex GTest::gtest_main GTest::gmock Threads::Threads)
 
 include(GoogleTest)
 gtest_discover_tests(runloop_tests)
