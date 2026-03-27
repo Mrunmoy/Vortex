@@ -124,7 +124,6 @@ namespace vortex
 
                 // Build wait array: wakeup event + source handles + timer handles.
                 std::vector<HANDLE> handles;
-                std::vector<TimerId> timerIds;
                 {
                     // Atomic snapshot: both locks held to prevent WFMO overflow.
                     // Lock ordering: m_sourcesMutex before m_timersMutex.
@@ -141,7 +140,6 @@ namespace vortex
                         if (entry.handle != nullptr)
                         {
                             handles.push_back(entry.handle);
-                            timerIds.push_back(tid);
                         }
                     }
                 }
@@ -168,52 +166,80 @@ namespace vortex
                     }
                     else
                     {
-                        HANDLE signalled = handles[idx];
-
-                        // Check if it's a timer handle.
-                        std::function<void()> handler;
-                        bool isTimer = false;
-                        TimerId firedTimerId = 0;
-                        bool oneShot = false;
-                        {
-                            std::lock_guard<std::mutex> lock(m_timersMutex);
-                            for (auto &[tid, entry] : m_timers)
+                        // Dispatch helper: look up and invoke the handler for a
+                        // signaled handle (timer or source).
+                        auto dispatchHandle = [this](HANDLE signalled) {
+                            std::function<void()> handler;
+                            bool isTimer = false;
+                            TimerId firedTimerId = 0;
+                            bool oneShot = false;
                             {
-                                if (entry.handle == signalled)
+                                std::lock_guard<std::mutex> lock(m_timersMutex);
+                                for (auto &[tid, entry] : m_timers)
                                 {
-                                    isTimer = true;
-                                    firedTimerId = tid;
-                                    oneShot = !entry.repeating;
-                                    handler = entry.handler;
-                                    break;
+                                    if (entry.handle == signalled)
+                                    {
+                                        isTimer = true;
+                                        firedTimerId = tid;
+                                        oneShot = !entry.repeating;
+                                        handler = entry.handler;
+                                        break;
+                                    }
                                 }
                             }
-                        }
 
-                        if (isTimer)
-                        {
-                            if (handler)
+                            if (isTimer)
                             {
-                                handler();
-                            }
-                            if (oneShot)
-                            {
-                                removeTimer(firedTimerId);
-                            }
-                        }
-                        else
-                        {
-                            {
-                                std::lock_guard<std::mutex> lock(m_sourcesMutex);
-                                auto it = m_sources.find(signalled);
-                                if (it != m_sources.end())
+                                if (handler)
                                 {
-                                    handler = it->second.handler;
+                                    handler();
+                                }
+                                if (oneShot)
+                                {
+                                    removeTimer(firedTimerId);
                                 }
                             }
-                            if (handler)
+                            else
                             {
-                                handler();
+                                // Source dispatch.
+                                // NOTE: onError callbacks are stored in SourceEntry
+                                // but never fired by the WFMO backend — WFMO cannot
+                                // distinguish data-ready from error/hangup.  Only
+                                // the data handler is invoked here.  Error-callback
+                                // parity requires the planned IOCP backend.
+                                {
+                                    std::lock_guard<std::mutex> lock(m_sourcesMutex);
+                                    auto it = m_sources.find(signalled);
+                                    if (it != m_sources.end())
+                                    {
+                                        handler = it->second.handler;
+                                    }
+                                }
+                                if (handler)
+                                {
+                                    handler();
+                                }
+                            }
+                        };
+
+                        // Dispatch the primary signaled handle.
+                        dispatchHandle(handles[idx]);
+
+                        // Starvation sweep: WFMO always returns the lowest
+                        // signaled index, starving higher-indexed handles under
+                        // load.  Poll remaining handles with a zero timeout to
+                        // give them a chance to dispatch in the same iteration.
+                        // This is a mitigation, not a full fix — true fairness
+                        // requires the planned IOCP backend.
+                        for (DWORD i = idx + 1; i < count; ++i)
+                        {
+                            if (m_stopRequested.load(std::memory_order_acquire))
+                            {
+                                break;
+                            }
+                            if (WaitForSingleObject(handles[i], 0) == WAIT_OBJECT_0)
+                            {
+                                dispatchHandle(handles[i]);
                             }
                         }
                     }
