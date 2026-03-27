@@ -219,6 +219,20 @@ def generate_index(has_coverage, coverage_pct, bench_data):
     tr.winner td {{ color: #3fb950; font-weight: 600; }}
     .section-title {{ color: var(--accent); margin: 2rem 0 1rem; font-size: 1.3rem; }}
     .card p {{ line-height: 1.6; color: #8b949e; margin-bottom: 0.5rem; }}
+    .explainer {{ background: var(--card); border-radius: 8px; padding: 1.5rem; margin-bottom: 1.5rem; }}
+    .explainer dl {{ display: grid; gap: 1rem; }}
+    .explainer dt {{ color: var(--accent); font-weight: 600; font-size: 1rem; }}
+    .explainer dd {{ color: #8b949e; line-height: 1.6; margin: 0; }}
+    .explainer code {{ background: #21262d; padding: 0.15em 0.4em; border-radius: 3px; font-size: 0.9em; }}
+    .compare {{ width: 100%; border-collapse: collapse; margin: 0.5rem 0 1.5rem; }}
+    .compare th, .compare td {{ padding: 0.6rem 0.75rem; text-align: center;
+                                 border-bottom: 1px solid var(--table-border); font-size: 0.9rem; }}
+    .compare th {{ color: var(--accent); font-weight: 600; }}
+    .compare .row-label {{ text-align: left; color: var(--fg); font-weight: 500; }}
+    .compare .yes {{ color: #3fb950; }}
+    .compare .partial {{ color: #d29922; }}
+    .compare .no {{ color: #8b949e; }}
+    .summary {{ color: #8b949e; line-height: 1.6; margin-top: 0.75rem; }}
     footer {{ margin-top: 2rem; color: #484f58; font-size: 0.85rem; }}
   </style>
 </head>
@@ -230,7 +244,122 @@ def generate_index(has_coverage, coverage_pct, bench_data):
 {bench_html}
   </div>
 
-  <h2 class="section-title">About the Competitors</h2>
+  <h2 class="section-title">What the Numbers Mean</h2>
+  <div class="explainer">
+    <dl>
+      <dt>Post-to-Execute Latency</dt>
+      <dd>Time from when a thread calls &ldquo;post work&rdquo; to when that work
+      actually runs on the event loop thread. This is the most important metric for
+      real-time systems &mdash; it determines how quickly your loop reacts to
+      external requests. Lower is better.</dd>
+
+      <dt>Post Throughput</dt>
+      <dd>How many posted callables the loop can dispatch per second under sustained
+      load from a single producer. Measures raw event dispatch overhead. Note: libuv
+      coalesces multiple <code>uv_async_send</code> calls into a single wakeup,
+      which inflates its throughput number but means individual posts may be delayed.
+      Higher is better.</dd>
+
+      <dt>Timer Jitter</dt>
+      <dd>Mean deviation from the requested timer interval. A 1&thinsp;ms repeating
+      timer that fires at 1.017&thinsp;ms, 0.983&thinsp;ms, 1.012&thinsp;ms has low
+      jitter. This matters for periodic tasks like sensor polling, heartbeats, and
+      frame scheduling. Lower is better.</dd>
+
+      <dt>FD Reaction Time</dt>
+      <dd>Time from a byte being written to a pipe until the read-side handler fires
+      on the event loop. Measures the I/O polling fast path &mdash; how quickly the
+      loop wakes from epoll and dispatches your handler. Lower is better.</dd>
+    </dl>
+  </div>
+
+  <h2 class="section-title">Why Vortex?</h2>
+  <div class="explainer">
+    <table class="compare">
+      <tr>
+        <th></th>
+        <th>Vortex</th>
+        <th>libuv</th>
+        <th>libevent</th>
+        <th>Boost.Asio</th>
+      </tr>
+      <tr>
+        <td class="row-label">Language</td>
+        <td>C++17</td>
+        <td>C</td>
+        <td>C</td>
+        <td>C++11/14/17/20</td>
+      </tr>
+      <tr>
+        <td class="row-label">API style</td>
+        <td>Simple OOP &mdash; one class, six methods</td>
+        <td>Handle-based C callbacks</td>
+        <td>Handle-based C callbacks</td>
+        <td>Proactor pattern, completion handlers, coroutines</td>
+      </tr>
+      <tr>
+        <td class="row-label">Thread-safe posting</td>
+        <td class="yes">&#10003; Native</td>
+        <td class="partial">&#9711; uv_async (coalesced)</td>
+        <td class="no">&#10007; Requires socketpair workaround</td>
+        <td class="yes">&#10003; boost::asio::post</td>
+      </tr>
+      <tr>
+        <td class="row-label">Compile time</td>
+        <td class="yes">Fast &mdash; single header + one .cpp</td>
+        <td class="yes">Fast &mdash; small C library</td>
+        <td class="yes">Fast &mdash; small C library</td>
+        <td class="no">Slow &mdash; heavy template instantiation</td>
+      </tr>
+      <tr>
+        <td class="row-label">Dependencies</td>
+        <td class="yes">None (just pthreads)</td>
+        <td class="yes">None</td>
+        <td class="yes">None (optional OpenSSL)</td>
+        <td class="no">Boost headers (~500 MB installed)</td>
+      </tr>
+      <tr>
+        <td class="row-label">Binary size impact</td>
+        <td class="yes">~8 KB .text</td>
+        <td class="partial">~200 KB shared lib</td>
+        <td class="partial">~300 KB shared lib</td>
+        <td class="no">~100&ndash;500 KB (template bloat)</td>
+      </tr>
+      <tr>
+        <td class="row-label">Built-in networking</td>
+        <td class="no">No &mdash; pure event loop</td>
+        <td class="yes">TCP, UDP, pipes, TTY, DNS</td>
+        <td class="yes">TCP, HTTP, DNS, RPC</td>
+        <td class="yes">TCP, UDP, SSL, serial, pipes</td>
+      </tr>
+      <tr>
+        <td class="row-label">Learning curve</td>
+        <td class="yes">~30 min</td>
+        <td class="partial">~2 hours</td>
+        <td class="partial">~2 hours</td>
+        <td class="no">~1&ndash;2 days</td>
+      </tr>
+      <tr>
+        <td class="row-label">Best for</td>
+        <td>Embedded, RTOS, IPC, lightweight services</td>
+        <td>General-purpose async I/O, Node.js addons</td>
+        <td>Network servers, proxies</td>
+        <td>Complex async C++ applications, protocol stacks</td>
+      </tr>
+    </table>
+    <p class="summary">
+      <strong>Choose Vortex</strong> when you need a dead-simple event loop with
+      minimal footprint &mdash; post work from any thread, watch file descriptors,
+      schedule timers, and nothing else. No DNS resolvers, no HTTP parsers, no
+      template metaprogramming. Just a loop.
+    </p>
+    <p class="summary">
+      <strong>Choose the others</strong> when you need built-in networking (TCP/UDP/SSL),
+      protocol-level abstractions, or ecosystem integrations (Node.js, Boost libraries).
+    </p>
+  </div>
+
+  <h2 class="section-title">About the Libraries</h2>
   <div class="grid">
     <div class="card">
       <h2>Vortex</h2>
