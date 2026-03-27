@@ -75,7 +75,7 @@ namespace vortex
         //   epoll/kqueue: monitors fd for readability (EPOLLIN / EVFILT_READ)
         //   win32: handle must be a waitable kernel object (event, semaphore,
         //          etc.); pipes/sockets require overlapped I/O instead.
-        //          Max 63 sources (MAXIMUM_WAIT_OBJECTS - 1).
+        //          Max 63 combined sources + timers (MAXIMUM_WAIT_OBJECTS - 1).
         //   stub: handler is stored but never fired (no OS polling).
         void addSource(NativeHandle handle, std::function<void()> handler);
 

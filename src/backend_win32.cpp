@@ -1,5 +1,6 @@
 #include "RunLoop.h"
 
+#include <cassert>
 #include <stdexcept>
 #include <system_error>
 
@@ -124,13 +125,13 @@ namespace vortex
                 // Build wait array: wakeup event + source handles + timer handles.
                 std::vector<HANDLE> handles;
                 std::vector<TimerId> timerIds;
-                handles.push_back(m_wakeupHandle);
                 {
                     // Atomic snapshot: both locks held to prevent WFMO overflow.
                     // Lock ordering: m_sourcesMutex before m_timersMutex.
                     std::lock_guard<std::mutex> slock(m_sourcesMutex);
                     std::lock_guard<std::mutex> tlock(m_timersMutex);
                     handles.reserve(1 + m_sources.size() + m_timers.size());
+                    handles.push_back(m_wakeupHandle);
                     for (auto &[h, _] : m_sources)
                     {
                         handles.push_back(static_cast<HANDLE>(h));
@@ -144,6 +145,8 @@ namespace vortex
                         }
                     }
                 }
+
+                assert(handles.size() <= MAXIMUM_WAIT_OBJECTS);
 
                 DWORD count = static_cast<DWORD>(handles.size());
                 DWORD result = WaitForMultipleObjects(count, handles.data(), FALSE, INFINITE);

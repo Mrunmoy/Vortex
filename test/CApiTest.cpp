@@ -445,21 +445,28 @@ TEST(CApiTest, AddTimerRejectsWhenSlotsFull)
 
     auto cb = [](void *) {};
     std::vector<uint64_t> timerIds;
+    auto cleanup = [&] {
+        for (auto id : timerIds)
+            vortex_remove_timer(guard.loop, id);
+    };
 
     for (int i = 0; i < 63; ++i)
     {
         uint64_t id = 0;
         int rc = vortex_add_timer(guard.loop, 100000, 0, cb, nullptr, &id);
-        ASSERT_EQ(rc, VORTEX_SUCCESS) << "vortex_add_timer failed at i=" << i;
+        if (rc != VORTEX_SUCCESS)
+        {
+            cleanup();
+            FAIL() << "vortex_add_timer failed at i=" << i;
+        }
         timerIds.push_back(id);
     }
 
-    // 64th timer must return an error code, not crash.
+    // 64th timer must return VORTEX_ERR_INVALID_ARGUMENT, not crash.
     uint64_t overflow = 0;
-    EXPECT_NE(vortex_add_timer(guard.loop, 100000, 0, cb, nullptr, &overflow),
-              VORTEX_SUCCESS);
+    EXPECT_EQ(vortex_add_timer(guard.loop, 100000, 0, cb, nullptr, &overflow),
+              VORTEX_ERR_INVALID_ARGUMENT);
 
-    for (auto id : timerIds)
-        vortex_remove_timer(guard.loop, id);
+    cleanup();
 #endif
 }

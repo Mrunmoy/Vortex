@@ -4,7 +4,7 @@
 #include <atomic>
 #include <chrono>
 #include <stdexcept>
-#include <gmock/gmock.h>
+
 #include <thread>
 
 #if defined(_WIN32)
@@ -911,7 +911,7 @@ TEST(RunLoopTest, ReplaceSourceDoesNotConsumeSlot)
     // Fill all 63 source slots.
     for (int i = 0; i < 63; ++i)
     {
-        HANDLE ev = CreateEventA(nullptr, TRUE, FALSE, nullptr);
+        HANDLE ev = CreateEventA(nullptr, FALSE, FALSE, nullptr);
         ASSERT_NE(ev, nullptr);
         events.push_back(ev);
         ASSERT_NO_THROW(loop.addSource(static_cast<RunLoop::NativeHandle>(ev), [] {}));
@@ -922,7 +922,7 @@ TEST(RunLoopTest, ReplaceSourceDoesNotConsumeSlot)
         loop.addSource(static_cast<RunLoop::NativeHandle>(events[0]), [] {}));
 
     // A truly new handle must still be rejected.
-    HANDLE extra = CreateEventA(nullptr, TRUE, FALSE, nullptr);
+    HANDLE extra = CreateEventA(nullptr, FALSE, FALSE, nullptr);
     ASSERT_NE(extra, nullptr);
     EXPECT_THROW(
         loop.addSource(static_cast<RunLoop::NativeHandle>(extra), [] {}),
