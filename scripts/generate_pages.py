@@ -233,6 +233,12 @@ def generate_index(has_coverage, coverage_pct, bench_data):
     .compare .partial {{ color: #d29922; }}
     .compare .no {{ color: #8b949e; }}
     .summary {{ color: #8b949e; line-height: 1.6; margin-top: 0.75rem; }}
+    .highlight {{ border: 1px solid var(--accent); }}
+    .stat-row {{ display: flex; gap: 1.5rem; margin: 0.75rem 0; flex-wrap: wrap; }}
+    .stat {{ text-align: center; }}
+    .stat-val {{ display: block; font-size: 1.6rem; font-weight: 700; color: #3fb950; }}
+    .highlight .stat-val {{ color: var(--accent); }}
+    .stat-label {{ display: block; font-size: 0.8rem; color: #8b949e; margin-top: 0.15rem; }}
     footer {{ margin-top: 2rem; color: #484f58; font-size: 0.85rem; }}
   </style>
 </head>
@@ -359,35 +365,48 @@ def generate_index(has_coverage, coverage_pct, bench_data):
     </p>
   </div>
 
-  <h2 class="section-title">About the Libraries</h2>
+  <h2 class="section-title">Resource Footprint</h2>
   <div class="grid">
-    <div class="card">
+    <div class="card highlight">
       <h2>Vortex</h2>
-      <p>Lightweight C++17 event loop with thread-safe posting, fd source watching,
-      and timer support. Single-header design, epoll/kqueue/IOCP backends.
-      Built for simplicity and low latency in embedded and server applications.</p>
-      <a href="https://github.com/Mrunmoy/Vortex">GitHub &rarr;</a>
+      <div class="stat-row">
+        <div class="stat"><span class="stat-val">~18 KB</span><span class="stat-label">.text (code)</span></div>
+        <div class="stat"><span class="stat-val">312 B</span><span class="stat-label">RAM per instance</span></div>
+        <div class="stat"><span class="stat-val">0</span><span class="stat-label">heap allocs at init</span></div>
+      </div>
+      <p>Designed for environments where every kilobyte counts &mdash; RTOS,
+      microcontrollers, safety-critical systems, and latency-sensitive services.
+      No dynamic linking, no transitive dependencies, no hidden allocations.</p>
     </div>
     <div class="card">
       <h2>libuv</h2>
-      <p>The event loop behind Node.js. Cross-platform async I/O library supporting
-      epoll, kqueue, IOCP, and event ports. Battle-tested in production at massive scale.
-      C API with broad ecosystem support.</p>
-      <a href="https://libuv.org">libuv.org &rarr;</a>
+      <div class="stat-row">
+        <div class="stat"><span class="stat-val">~194 KB</span><span class="stat-label">.so (shared lib)</span></div>
+        <div class="stat"><span class="stat-val">~1.5 KB</span><span class="stat-label">RAM per loop</span></div>
+      </div>
+      <p>Carries TCP, UDP, DNS, TTY, pipes, process spawning, and thread-pool
+      machinery &mdash; whether you use them or not. Designed for Node.js-scale
+      applications, not resource-constrained targets.</p>
     </div>
     <div class="card">
       <h2>libevent</h2>
-      <p>Event notification library powering Tor, Chromium, and Memcached.
-      Provides abstractions over select, poll, epoll, kqueue. Includes buffered I/O,
-      HTTP server, and DNS resolver. Mature C library (since 2002).</p>
-      <a href="https://libevent.org">libevent.org &rarr;</a>
+      <div class="stat-row">
+        <div class="stat"><span class="stat-val">~300 KB</span><span class="stat-label">.so (shared lib)</span></div>
+        <div class="stat"><span class="stat-val">~2 KB</span><span class="stat-label">RAM per base</span></div>
+      </div>
+      <p>Includes buffered I/O, an HTTP server, DNS resolver, and RPC framework.
+      Excellent for network servers, but all that machinery ships even if you only
+      need an event loop.</p>
     </div>
     <div class="card">
       <h2>Boost.Asio</h2>
-      <p>The de facto C++ async I/O library and basis for the C++ Networking TS.
-      Proactor pattern with completion handlers, coroutine support, and extensive
-      protocol coverage (TCP, UDP, SSL, serial). Part of Boost since 2005.</p>
-      <a href="https://www.boost.org/doc/libs/release/doc/html/boost_asio.html">Boost docs &rarr;</a>
+      <div class="stat-row">
+        <div class="stat"><span class="stat-val">100&ndash;500 KB</span><span class="stat-label">.text (template bloat)</span></div>
+        <div class="stat"><span class="stat-val">~500 MB</span><span class="stat-label">Boost install size</span></div>
+      </div>
+      <p>Header-only templates mean every translation unit re-instantiates the
+      I/O machinery. Powerful for complex protocol stacks, but the compile-time
+      and binary-size cost is significant for small projects.</p>
     </div>
   </div>
 
