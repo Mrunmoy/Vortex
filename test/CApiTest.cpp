@@ -400,9 +400,11 @@ TEST(CApiTest, AddSourceWithErrorNullGuards)
               VORTEX_ERR_INVALID_ARGUMENT);
 }
 
-#if !defined(_WIN32)
 TEST(CApiTest, AddSourceWithErrorCallback)
 {
+#if defined(_WIN32)
+    GTEST_SKIP() << "CreatePipe handles are not waitable by WaitForMultipleObjects";
+#else
     VortexGuard guard;
     ASSERT_EQ(vortex_init(guard.loop, "ErrorCallback"), VORTEX_SUCCESS);
 
@@ -430,5 +432,41 @@ TEST(CApiTest, AddSourceWithErrorCallback)
     vortex_stop(guard.loop);
     t.join();
     close(fds[0]);
-}
 #endif
+}
+
+TEST(CApiTest, AddTimerRejectsWhenSlotsFull)
+{
+#if !defined(_WIN32)
+    GTEST_SKIP() << "WFMO slot budget is Win32-specific";
+#else
+    VortexGuard guard;
+    ASSERT_EQ(vortex_init(guard.loop, "CTimerSlots"), VORTEX_SUCCESS);
+
+    auto cb = [](void *) {};
+    std::vector<uint64_t> timerIds;
+    auto cleanup = [&] {
+        for (auto id : timerIds)
+            vortex_remove_timer(guard.loop, id);
+    };
+
+    for (int i = 0; i < 63; ++i)
+    {
+        uint64_t id = 0;
+        int rc = vortex_add_timer(guard.loop, 100000, 0, cb, nullptr, &id);
+        if (rc != VORTEX_SUCCESS)
+        {
+            cleanup();
+            FAIL() << "vortex_add_timer failed at i=" << i;
+        }
+        timerIds.push_back(id);
+    }
+
+    // 64th timer must return VORTEX_ERR_INVALID_ARGUMENT, not crash.
+    uint64_t overflow = 0;
+    EXPECT_EQ(vortex_add_timer(guard.loop, 100000, 0, cb, nullptr, &overflow),
+              VORTEX_ERR_INVALID_ARGUMENT);
+
+    cleanup();
+#endif
+}

@@ -1,5 +1,6 @@
 #include "RunLoop.h"
 
+#include <cassert>
 #include <stdexcept>
 #include <system_error>
 
@@ -20,7 +21,10 @@ namespace vortex
     // - Maximum source count is MAXIMUM_WAIT_OBJECTS - 1 (63), since the
     //   wakeup event occupies one slot.
 
-    static constexpr DWORD MAX_SOURCES = MAXIMUM_WAIT_OBJECTS - 1;
+    // Max usable WFMO slots: 1 slot reserved for wakeup event, remainder
+    // shared by sources and timers.  MAXIMUM_WAIT_OBJECTS is 64 on all
+    // Windows SKUs.
+    static constexpr DWORD kMaxWaitSlots = MAXIMUM_WAIT_OBJECTS - 1;
 
     RunLoop::RunLoop() = default;
 
@@ -121,16 +125,17 @@ namespace vortex
                 // Build wait array: wakeup event + source handles + timer handles.
                 std::vector<HANDLE> handles;
                 std::vector<TimerId> timerIds;
-                handles.push_back(m_wakeupHandle);
                 {
-                    std::lock_guard<std::mutex> lock(m_sourcesMutex);
+                    // Atomic snapshot: both locks held to prevent WFMO overflow.
+                    // Lock ordering: m_sourcesMutex before m_timersMutex.
+                    std::lock_guard<std::mutex> slock(m_sourcesMutex);
+                    std::lock_guard<std::mutex> tlock(m_timersMutex);
+                    handles.reserve(1 + m_sources.size() + m_timers.size());
+                    handles.push_back(m_wakeupHandle);
                     for (auto &[h, _] : m_sources)
                     {
                         handles.push_back(static_cast<HANDLE>(h));
                     }
-                }
-                {
-                    std::lock_guard<std::mutex> lock(m_timersMutex);
                     for (auto &[tid, entry] : m_timers)
                     {
                         if (entry.handle != nullptr)
@@ -140,6 +145,8 @@ namespace vortex
                         }
                     }
                 }
+
+                assert(handles.size() <= MAXIMUM_WAIT_OBJECTS);
 
                 DWORD count = static_cast<DWORD>(handles.size());
                 DWORD result = WaitForMultipleObjects(count, handles.data(), FALSE, INFINITE);
@@ -245,13 +252,20 @@ namespace vortex
     void RunLoop::addSource(NativeHandle handle, std::function<void()> handler,
                             std::function<void()> onError)
     {
-        std::lock_guard<std::mutex> lock(m_sourcesMutex);
-        if (m_sources.find(handle) == m_sources.end() && m_sources.size() >= MAX_SOURCES)
+        // Lock ordering: m_sourcesMutex before m_timersMutex.
+        std::lock_guard<std::mutex> slock(m_sourcesMutex);
+        std::lock_guard<std::mutex> tlock(m_timersMutex);
+
+        const bool isNew = (m_sources.find(handle) == m_sources.end());
+        if (isNew && (m_sources.size() + m_timers.size() >= kMaxWaitSlots))
         {
             throw std::runtime_error(
-                "RunLoop::addSource: source limit reached (max "
-                + std::to_string(MAX_SOURCES) + ")");
+                "RunLoop::addSource: slot limit reached (sources="
+                + std::to_string(m_sources.size())
+                + ", timers=" + std::to_string(m_timers.size())
+                + ", max=" + std::to_string(kMaxWaitSlots) + ")");
         }
+
         m_sources[handle] = {std::move(handler), std::move(onError)};
         wakeup();
     }
@@ -298,7 +312,19 @@ namespace vortex
 
         TimerId id = m_nextTimerId.fetch_add(1, std::memory_order_relaxed);
         {
-            std::lock_guard<std::mutex> lock(m_timersMutex);
+            // Lock ordering: m_sourcesMutex before m_timersMutex.
+            std::lock_guard<std::mutex> slock(m_sourcesMutex);
+            std::lock_guard<std::mutex> tlock(m_timersMutex);
+            if (m_sources.size() + m_timers.size() >= kMaxWaitSlots)
+            {
+                CancelWaitableTimer(timerHandle);
+                CloseHandle(timerHandle);
+                throw std::runtime_error(
+                    "RunLoop::addTimer: slot limit reached (sources="
+                    + std::to_string(m_sources.size())
+                    + ", timers=" + std::to_string(m_timers.size())
+                    + ", max=" + std::to_string(kMaxWaitSlots) + ")");
+            }
             m_timers[id] = {intervalMs, repeating, std::move(handler), timerHandle};
         }
         wakeup();
