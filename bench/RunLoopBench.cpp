@@ -697,7 +697,7 @@ static void BM_Libevent_TimerJitter(benchmark::State& state)
         ctx.base = base;
         ctx.stamps.reserve(kTimerSamples);
 
-        ctx.ev = evtimer_new(base, [](evutil_socket_t, short, void* arg) {
+        auto timer_cb = [](evutil_socket_t, short, void* arg) {
             auto* c = static_cast<TimerCtx*>(arg);
             {
                 std::lock_guard<std::mutex> lk(c->mu);
@@ -706,7 +706,8 @@ static void BM_Libevent_TimerJitter(benchmark::State& state)
             // Re-arm the timer for repeating behaviour
             struct timeval tv = {0, kTimerIntervalMs * 1000};
             evtimer_add(c->ev, &tv);
-        }, &ctx);
+        };
+        ctx.ev = evtimer_new(base, timer_cb, &ctx);
 
         struct timeval tv = {0, static_cast<long>(kTimerIntervalMs * 1000)};
         evtimer_add(ctx.ev, &tv);

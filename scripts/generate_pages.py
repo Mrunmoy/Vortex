@@ -104,8 +104,10 @@ def load_benchmarks():
             results[category] = {}
 
         if category == "PostThroughput":
-            # Use items_per_second counter
-            ips = bm.get("counters", {}).get("items_per_second", 0)
+            # items_per_second may be top-level or in counters
+            ips = bm.get("items_per_second", 0)
+            if ips == 0:
+                ips = bm.get("counters", {}).get("items_per_second", 0)
             results[category][library] = ips
         else:
             # Use real_time (manual time in ns)
