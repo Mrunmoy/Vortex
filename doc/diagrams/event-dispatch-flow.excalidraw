@@ -1,0 +1,241 @@
+{
+  "type": "excalidraw",
+  "version": 2,
+  "source": "http://localhost:3000",
+  "elements": [
+    {
+      "id": "title", "type": "text", "x": 60, "y": 20, "width": 600, "height": 35,
+      "angle": 0, "strokeColor": "#1e1e1e", "backgroundColor": "transparent",
+      "fillStyle": "solid", "strokeWidth": 2, "strokeStyle": "solid", "roughness": 0,
+      "opacity": 100, "groupIds": [], "frameId": null, "index": "a0", "roundness": null,
+      "seed": 1001, "version": 1, "versionNonce": 1002, "isDeleted": false,
+      "boundElements": null, "updated": 1774700000000, "link": null, "locked": false,
+      "text": "Vortex — Event Dispatch Flow (one iteration of run())",
+      "originalText": "Vortex — Event Dispatch Flow (one iteration of run())",
+      "autoResize": true, "fontSize": 22, "fontFamily": 2, "textAlign": "center",
+      "verticalAlign": "top", "containerId": null, "lineHeight": 1.25
+    },
+
+    {
+      "id": "s1", "type": "rectangle", "x": 60, "y": 80, "width": 300, "height": 70,
+      "angle": 0, "strokeColor": "#1971c2", "backgroundColor": "#dbe4ff",
+      "fillStyle": "solid", "strokeWidth": 2, "strokeStyle": "solid", "roughness": 0,
+      "opacity": 100, "groupIds": [], "frameId": null, "index": "a1",
+      "roundness": {"type": 3}, "seed": 2001, "version": 1, "versionNonce": 2002,
+      "isDeleted": false, "boundElements": [{"id": "t1", "type": "text"}],
+      "updated": 1774700000000, "link": null, "locked": false
+    },
+    {
+      "id": "t1", "type": "text", "x": 65, "y": 88, "width": 290, "height": 55,
+      "angle": 0, "strokeColor": "#1e1e1e", "backgroundColor": "transparent",
+      "fillStyle": "solid", "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0,
+      "opacity": 100, "groupIds": [], "frameId": null, "index": "a1a", "roundness": null,
+      "seed": 2003, "version": 1, "versionNonce": 2004, "isDeleted": false,
+      "boundElements": null, "updated": 1774700000000, "link": null, "locked": false,
+      "text": "1. Check m_stopRequested\n   If true → exit run(), reset flags\n   (loop is restartable after stop)",
+      "originalText": "1. Check m_stopRequested\n   If true → exit run(), reset flags\n   (loop is restartable after stop)",
+      "autoResize": true, "fontSize": 12, "fontFamily": 2, "textAlign": "left",
+      "verticalAlign": "middle", "containerId": "s1", "lineHeight": 1.25
+    },
+
+    {
+      "id": "a12", "type": "arrow", "x": 210, "y": 150, "width": 0, "height": 30,
+      "angle": 0, "strokeColor": "#495057", "backgroundColor": "transparent",
+      "fillStyle": "solid", "strokeWidth": 2, "strokeStyle": "solid", "roughness": 0,
+      "opacity": 70, "groupIds": [], "frameId": null, "index": "a2",
+      "roundness": {"type": 2}, "seed": 3001, "version": 1, "versionNonce": 3002,
+      "isDeleted": false, "boundElements": null, "updated": 1774700000000,
+      "link": null, "locked": false,
+      "points": [[0,0],[0,30]], "lastCommittedPoint": null,
+      "startBinding": null, "endBinding": null,
+      "startArrowhead": null, "endArrowhead": "arrow", "elbowed": false
+    },
+
+    {
+      "id": "s2", "type": "rectangle", "x": 60, "y": 190, "width": 300, "height": 70,
+      "angle": 0, "strokeColor": "#862e9c", "backgroundColor": "#e5dbff",
+      "fillStyle": "solid", "strokeWidth": 2, "strokeStyle": "solid", "roughness": 0,
+      "opacity": 100, "groupIds": [], "frameId": null, "index": "a3",
+      "roundness": {"type": 3}, "seed": 4001, "version": 1, "versionNonce": 4002,
+      "isDeleted": false, "boundElements": [{"id": "t2", "type": "text"}],
+      "updated": 1774700000000, "link": null, "locked": false
+    },
+    {
+      "id": "t2", "type": "text", "x": 65, "y": 198, "width": 290, "height": 55,
+      "angle": 0, "strokeColor": "#1e1e1e", "backgroundColor": "transparent",
+      "fillStyle": "solid", "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0,
+      "opacity": 100, "groupIds": [], "frameId": null, "index": "a3a", "roundness": null,
+      "seed": 4003, "version": 1, "versionNonce": 4004, "isDeleted": false,
+      "boundElements": null, "updated": 1774700000000, "link": null, "locked": false,
+      "text": "2. Drain post queue\n   lock(m_postMutex) → swap(m_postQueue)\n   Execute each fn() in FIFO order",
+      "originalText": "2. Drain post queue\n   lock(m_postMutex) → swap(m_postQueue)\n   Execute each fn() in FIFO order",
+      "autoResize": true, "fontSize": 12, "fontFamily": 2, "textAlign": "left",
+      "verticalAlign": "middle", "containerId": "s2", "lineHeight": 1.25
+    },
+
+    {
+      "id": "a23", "type": "arrow", "x": 210, "y": 260, "width": 0, "height": 30,
+      "angle": 0, "strokeColor": "#495057", "backgroundColor": "transparent",
+      "fillStyle": "solid", "strokeWidth": 2, "strokeStyle": "solid", "roughness": 0,
+      "opacity": 70, "groupIds": [], "frameId": null, "index": "a4",
+      "roundness": {"type": 2}, "seed": 5001, "version": 1, "versionNonce": 5002,
+      "isDeleted": false, "boundElements": null, "updated": 1774700000000,
+      "link": null, "locked": false,
+      "points": [[0,0],[0,30]], "lastCommittedPoint": null,
+      "startBinding": null, "endBinding": null,
+      "startArrowhead": null, "endArrowhead": "arrow", "elbowed": false
+    },
+
+    {
+      "id": "s3", "type": "rectangle", "x": 60, "y": 300, "width": 300, "height": 80,
+      "angle": 0, "strokeColor": "#2f9e44", "backgroundColor": "#b2f2bb",
+      "fillStyle": "solid", "strokeWidth": 2, "strokeStyle": "solid", "roughness": 0,
+      "opacity": 100, "groupIds": [], "frameId": null, "index": "a5",
+      "roundness": {"type": 3}, "seed": 6001, "version": 1, "versionNonce": 6002,
+      "isDeleted": false, "boundElements": [{"id": "t3", "type": "text"}],
+      "updated": 1774700000000, "link": null, "locked": false
+    },
+    {
+      "id": "t3", "type": "text", "x": 65, "y": 308, "width": 290, "height": 65,
+      "angle": 0, "strokeColor": "#1e1e1e", "backgroundColor": "transparent",
+      "fillStyle": "solid", "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0,
+      "opacity": 100, "groupIds": [], "frameId": null, "index": "a5a", "roundness": null,
+      "seed": 6003, "version": 1, "versionNonce": 6004, "isDeleted": false,
+      "boundElements": null, "updated": 1774700000000, "link": null, "locked": false,
+      "text": "3. BLOCK in OS poll\n   Linux:   epoll_wait(m_pollFd, ...)\n   macOS:   kevent(m_pollFd, ...)\n   Win32:   WaitForMultipleObjects(...)\n   Thread sleeps here until event",
+      "originalText": "3. BLOCK in OS poll\n   Linux:   epoll_wait(m_pollFd, ...)\n   macOS:   kevent(m_pollFd, ...)\n   Win32:   WaitForMultipleObjects(...)\n   Thread sleeps here until event",
+      "autoResize": true, "fontSize": 11, "fontFamily": 3, "textAlign": "left",
+      "verticalAlign": "middle", "containerId": "s3", "lineHeight": 1.25
+    },
+
+    {
+      "id": "a34", "type": "arrow", "x": 210, "y": 380, "width": 0, "height": 30,
+      "angle": 0, "strokeColor": "#495057", "backgroundColor": "transparent",
+      "fillStyle": "solid", "strokeWidth": 2, "strokeStyle": "solid", "roughness": 0,
+      "opacity": 70, "groupIds": [], "frameId": null, "index": "a6",
+      "roundness": {"type": 2}, "seed": 7001, "version": 1, "versionNonce": 7002,
+      "isDeleted": false, "boundElements": null, "updated": 1774700000000,
+      "link": null, "locked": false,
+      "points": [[0,0],[0,30]], "lastCommittedPoint": null,
+      "startBinding": null, "endBinding": null,
+      "startArrowhead": null, "endArrowhead": "arrow", "elbowed": false
+    },
+
+    {
+      "id": "s4", "type": "rectangle", "x": 60, "y": 420, "width": 300, "height": 100,
+      "angle": 0, "strokeColor": "#e67700", "backgroundColor": "#fff3bf",
+      "fillStyle": "solid", "strokeWidth": 2, "strokeStyle": "solid", "roughness": 0,
+      "opacity": 100, "groupIds": [], "frameId": null, "index": "a7",
+      "roundness": {"type": 3}, "seed": 8001, "version": 1, "versionNonce": 8002,
+      "isDeleted": false, "boundElements": [{"id": "t4", "type": "text"}],
+      "updated": 1774700000000, "link": null, "locked": false
+    },
+    {
+      "id": "t4", "type": "text", "x": 65, "y": 428, "width": 290, "height": 85,
+      "angle": 0, "strokeColor": "#1e1e1e", "backgroundColor": "transparent",
+      "fillStyle": "solid", "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0,
+      "opacity": 100, "groupIds": [], "frameId": null, "index": "a7a", "roundness": null,
+      "seed": 8003, "version": 1, "versionNonce": 8004, "isDeleted": false,
+      "boundElements": null, "updated": 1774700000000, "link": null, "locked": false,
+      "text": "4. Dispatch signaled event\n   Wakeup pipe → loop back to step 1\n   Source fd ready → call handler()\n   Timer fired → call handler()\n     one-shot: auto-remove\n     repeating: re-arm\n   Source error → call onError() + remove",
+      "originalText": "4. Dispatch signaled event\n   Wakeup pipe → loop back to step 1\n   Source fd ready → call handler()\n   Timer fired → call handler()\n     one-shot: auto-remove\n     repeating: re-arm\n   Source error → call onError() + remove",
+      "autoResize": true, "fontSize": 11, "fontFamily": 2, "textAlign": "left",
+      "verticalAlign": "middle", "containerId": "s4", "lineHeight": 1.25
+    },
+
+    {
+      "id": "loop_back", "type": "arrow", "x": 60, "y": 470, "width": -30, "height": -360,
+      "angle": 0, "strokeColor": "#c92a2a", "backgroundColor": "transparent",
+      "fillStyle": "solid", "strokeWidth": 2, "strokeStyle": "dashed", "roughness": 0,
+      "opacity": 50, "groupIds": [], "frameId": null, "index": "a8",
+      "roundness": {"type": 2}, "seed": 9001, "version": 1, "versionNonce": 9002,
+      "isDeleted": false, "boundElements": null, "updated": 1774700000000,
+      "link": null, "locked": false,
+      "points": [[0,0],[-30,0],[-30,-360],[0,-360]], "lastCommittedPoint": null,
+      "startBinding": null, "endBinding": null,
+      "startArrowhead": null, "endArrowhead": "arrow", "elbowed": false
+    },
+    {
+      "id": "loop_label", "type": "text", "x": -10, "y": 280, "width": 50, "height": 18,
+      "angle": 0, "strokeColor": "#c92a2a", "backgroundColor": "transparent",
+      "fillStyle": "solid", "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0,
+      "opacity": 50, "groupIds": [], "frameId": null, "index": "a8a", "roundness": null,
+      "seed": 9003, "version": 1, "versionNonce": 9004, "isDeleted": false,
+      "boundElements": null, "updated": 1774700000000, "link": null, "locked": false,
+      "text": "loop", "originalText": "loop",
+      "autoResize": true, "fontSize": 13, "fontFamily": 2, "textAlign": "center",
+      "verticalAlign": "top", "containerId": null, "lineHeight": 1.25
+    },
+
+    {
+      "id": "wake_sources", "type": "rectangle", "x": 420, "y": 80, "width": 320, "height": 200,
+      "angle": 0, "strokeColor": "#495057", "backgroundColor": "#f8f9fa",
+      "fillStyle": "solid", "strokeWidth": 2, "strokeStyle": "solid", "roughness": 0,
+      "opacity": 100, "groupIds": [], "frameId": null, "index": "a9",
+      "roundness": {"type": 3}, "seed": 10001, "version": 1, "versionNonce": 10002,
+      "isDeleted": false, "boundElements": [{"id": "t_wake", "type": "text"}],
+      "updated": 1774700000000, "link": null, "locked": false
+    },
+    {
+      "id": "t_wake", "type": "text", "x": 425, "y": 88, "width": 310, "height": 185,
+      "angle": 0, "strokeColor": "#1e1e1e", "backgroundColor": "transparent",
+      "fillStyle": "solid", "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0,
+      "opacity": 100, "groupIds": [], "frameId": null, "index": "a9a", "roundness": null,
+      "seed": 10003, "version": 1, "versionNonce": 10004, "isDeleted": false,
+      "boundElements": null, "updated": 1774700000000, "link": null, "locked": false,
+      "text": "What wakes the loop (step 3 unblocks):\n\n• Source fd becomes readable\n  → data arrived on watched handle\n\n• Timer fires\n  → interval elapsed\n\n• Wakeup signal\n  → executeOnRunLoop() posted a callable\n  → addSource/removeSource called\n  → stop() called\n  → addTimer/removeTimer called\n\nAll wake the loop by writing to the\nwakeup pipe/event.",
+      "originalText": "What wakes the loop (step 3 unblocks):\n\n• Source fd becomes readable\n  → data arrived on watched handle\n\n• Timer fires\n  → interval elapsed\n\n• Wakeup signal\n  → executeOnRunLoop() posted a callable\n  → addSource/removeSource called\n  → stop() called\n  → addTimer/removeTimer called\n\nAll wake the loop by writing to the\nwakeup pipe/event.",
+      "autoResize": true, "fontSize": 11, "fontFamily": 2, "textAlign": "left",
+      "verticalAlign": "middle", "containerId": "wake_sources", "lineHeight": 1.25
+    },
+
+    {
+      "id": "exceptions", "type": "rectangle", "x": 420, "y": 310, "width": 320, "height": 100,
+      "angle": 0, "strokeColor": "#c92a2a", "backgroundColor": "#ffe3e3",
+      "fillStyle": "solid", "strokeWidth": 2, "strokeStyle": "solid", "roughness": 0,
+      "opacity": 100, "groupIds": [], "frameId": null, "index": "aA",
+      "roundness": {"type": 3}, "seed": 11001, "version": 1, "versionNonce": 11002,
+      "isDeleted": false, "boundElements": [{"id": "t_exc", "type": "text"}],
+      "updated": 1774700000000, "link": null, "locked": false
+    },
+    {
+      "id": "t_exc", "type": "text", "x": 425, "y": 318, "width": 310, "height": 85,
+      "angle": 0, "strokeColor": "#c92a2a", "backgroundColor": "transparent",
+      "fillStyle": "solid", "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0,
+      "opacity": 100, "groupIds": [], "frameId": null, "index": "aAa", "roundness": null,
+      "seed": 11003, "version": 1, "versionNonce": 11004, "isDeleted": false,
+      "boundElements": null, "updated": 1774700000000, "link": null, "locked": false,
+      "text": "Exception handling:\n\nIf a handler/callable throws:\n1. Flags are reset (m_running, m_stopRequested)\n2. Exception propagates out of run()\n3. Loop is restartable — call run() again\n\nOS poll failure → throws std::system_error",
+      "originalText": "Exception handling:\n\nIf a handler/callable throws:\n1. Flags are reset (m_running, m_stopRequested)\n2. Exception propagates out of run()\n3. Loop is restartable — call run() again\n\nOS poll failure → throws std::system_error",
+      "autoResize": true, "fontSize": 11, "fontFamily": 2, "textAlign": "left",
+      "verticalAlign": "middle", "containerId": "exceptions", "lineHeight": 1.25
+    },
+
+    {
+      "id": "guarantees", "type": "rectangle", "x": 420, "y": 440, "width": 320, "height": 80,
+      "angle": 0, "strokeColor": "#2f9e44", "backgroundColor": "#d3f9d8",
+      "fillStyle": "solid", "strokeWidth": 2, "strokeStyle": "solid", "roughness": 0,
+      "opacity": 100, "groupIds": [], "frameId": null, "index": "aB",
+      "roundness": {"type": 3}, "seed": 12001, "version": 1, "versionNonce": 12002,
+      "isDeleted": false, "boundElements": [{"id": "t_guar", "type": "text"}],
+      "updated": 1774700000000, "link": null, "locked": false
+    },
+    {
+      "id": "t_guar", "type": "text", "x": 425, "y": 448, "width": 310, "height": 65,
+      "angle": 0, "strokeColor": "#1e1e1e", "backgroundColor": "transparent",
+      "fillStyle": "solid", "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0,
+      "opacity": 100, "groupIds": [], "frameId": null, "index": "aBa", "roundness": null,
+      "seed": 12003, "version": 1, "versionNonce": 12004, "isDeleted": false,
+      "boundElements": null, "updated": 1774700000000, "link": null, "locked": false,
+      "text": "Guarantees:\n• Handlers run sequentially (no concurrency)\n• Posted callables run in FIFO order\n• removeSource from handler is safe\n• stop() from handler is safe",
+      "originalText": "Guarantees:\n• Handlers run sequentially (no concurrency)\n• Posted callables run in FIFO order\n• removeSource from handler is safe\n• stop() from handler is safe",
+      "autoResize": true, "fontSize": 11, "fontFamily": 2, "textAlign": "left",
+      "verticalAlign": "middle", "containerId": "guarantees", "lineHeight": 1.25
+    }
+  ],
+  "appState": {
+    "gridSize": 20, "gridStep": 5, "gridModeEnabled": true,
+    "viewBackgroundColor": "#ffffff"
+  },
+  "files": {}
+}
