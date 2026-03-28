@@ -82,14 +82,21 @@ Types: `NativeHandle` is `int` on Unix, `void*` on Win32. `TimerId` is `uint64_t
 |----------|---------|-----------|-------|
 | Linux | `backend_epoll.cpp` | `epoll` + `timerfd` | Preferred backend. |
 | macOS | `backend_kqueue.cpp` | `kqueue` + `EVFILT_TIMER` | Native kernel event queue. |
-| Windows | `backend_win32.cpp` | `WaitForMultipleObjects` + `CreateWaitableTimer` | Combined 63-handle limit for sources and timers. |
+| Windows (IOCP) | `backend_win32_iocp.cpp` | `IOCP` + `RegisterWaitForSingleObject` + threadpool timers | **Default.** No handle limit. Fair dispatch. |
+| Windows (WFMO) | `backend_win32.cpp` | `WaitForMultipleObjects` + `CreateWaitableTimer` | Legacy. Combined 63-handle limit for sources and timers. |
 | Stub | `backend_stub.cpp` | Polling fallback | For porting to new platforms. |
+
+Select the Windows backend at CMake configure time:
+```bash
+cmake -B build -DVORTEX_BACKEND=win32_iocp   # IOCP (default on Windows)
+cmake -B build -DVORTEX_BACKEND=win32         # Legacy WFMO
+```
 
 ## How It Works
 
 ![Dispatch Flow](doc/diagrams/event-dispatch-flow.png)
 
-The `run()` method enters a blocking wait on the platform's native multiplexer (epoll, kqueue, or WFMO). When an event fires -- a descriptor becomes readable, a timer expires, or the internal wake pipe is signalled -- the loop dispatches the corresponding handler on its own thread. Posted callables are drained in FIFO order on each iteration of the dispatch cycle. Calling `stop()` writes to the wake pipe, causing `run()` to return after processing any remaining queued work.
+The `run()` method enters a blocking wait on the platform's native multiplexer (epoll, kqueue, or IOCP). When an event fires — a descriptor becomes readable, a timer expires, or the internal wakeup mechanism is signalled — the loop dispatches the corresponding handler on its own thread. Posted callables are drained in FIFO order on each iteration of the dispatch cycle. Calling `stop()` signals the loop, causing `run()` to return after processing any remaining queued work.
 
 All mutation methods (`addSource`, `removeSource`, `addTimer`, `removeTimer`, `executeOnRunLoop`) are thread-safe and can be called from any thread, including from within handlers.
 
@@ -155,9 +162,10 @@ src/
   CApi.cpp                     C API wrapper
   backend_epoll.cpp            Linux (epoll + timerfd)
   backend_kqueue.cpp           macOS (kqueue)
-  backend_win32.cpp            Windows (WaitForMultipleObjects)
+  backend_win32_iocp.cpp       Windows (IOCP — default)
+  backend_win32.cpp            Windows (WFMO — legacy)
   backend_stub.cpp             Polling fallback
-test/                          Google Test suite (47 tests)
+test/                          Google Test suite (86 tests)
 example/                       Usage examples
 doc/                           Architecture guide and diagrams
 build.py                       Build convenience script
