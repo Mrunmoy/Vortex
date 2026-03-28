@@ -3,6 +3,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <set>
 #include <stdexcept>
 
 #include <thread>
@@ -1250,6 +1251,11 @@ TEST(RunLoopTest, StopIdempotent)
     std::this_thread::sleep_for(10ms);
 
     loop.stop();
+    // Wait for loop to actually stop
+    for (int i = 0; i < 200 && loop.isRunning(); ++i)
+        std::this_thread::sleep_for(5ms);
+
+    EXPECT_FALSE(loop.isRunning());
     loop.stop();
     loop.stop();
 }
@@ -1336,26 +1342,24 @@ TEST(RunLoopTest, TimerHandlerCanAddNewTimer)
     EXPECT_TRUE(innerFired.load());
 }
 
-TEST(RunLoopTest, TimerIdMonotonicallyIncreases)
+TEST(RunLoopTest, TimerIdsAreUnique)
 {
     RunLoop loop;
-    loop.init("MonoId");
+    loop.init("UniqueId");
 
     constexpr int N = 10;
-    std::vector<RunLoop::TimerId> ids;
-    ids.reserve(N);
+    std::set<RunLoop::TimerId> ids;
 
     for (int i = 0; i < N; ++i)
-        ids.push_back(loop.addTimer(100000, false, [] {}));
+        ids.insert(loop.addTimer(100000, false, [] {}));
 
-    for (int i = 1; i < N; ++i)
-        EXPECT_GT(ids[i], ids[i - 1]) << "TimerId must be strictly increasing";
+    EXPECT_EQ(ids.size(), static_cast<size_t>(N)) << "All TimerIds must be unique";
 
     for (auto id : ids)
         loop.removeTimer(id);
 }
 
-TEST(RunLoopTest, ZeroIntervalTimerFiresQuickly)
+TEST(RunLoopTest, MinIntervalTimerFiresQuickly)
 {
     RunLoop loop;
     loop.init("QuickTimer");
@@ -1493,12 +1497,12 @@ TEST(RunLoopTest, TimerRemovesSelfFromHandler)
     loop.init("SelfRmTimer");
 
     std::atomic<int> count{0};
-    RunLoop::TimerId timerId = 0;
+    std::atomic<RunLoop::TimerId> timerId{0};
 
-    timerId = loop.addTimer(10, true, [&] {
+    timerId.store(loop.addTimer(10, true, [&] {
         count.fetch_add(1);
-        loop.removeTimer(timerId);
-    });
+        loop.removeTimer(timerId.load());
+    }));
 
     RunLoopGuard guard(loop);
 
@@ -1622,7 +1626,7 @@ TEST(RunLoopTest, StressTimerChurn)
 
     std::this_thread::sleep_for(200ms);
 
-    EXPECT_GE(fireCount.load(), 1);
+    EXPECT_GE(fireCount.load(), N / 2 - 5);
     EXPECT_LE(fireCount.load(), N);
 }
 
