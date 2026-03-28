@@ -729,8 +729,8 @@ TEST(RunLoopTest, AddSourceFromAnyThread)
 
 TEST(RunLoopTest, AddSourceRejectsWhenSlotsFull)
 {
-#if !defined(_WIN32)
-    GTEST_SKIP() << "WFMO slot limit is Win32-only";
+#if !defined(_WIN32) || defined(VORTEX_BACKEND_IOCP)
+    GTEST_SKIP() << "WFMO slot limit is Win32-WFMO-specific";
 #else
     RunLoop loop;
     loop.init("SlotFullSrc");
@@ -766,8 +766,8 @@ TEST(RunLoopTest, AddSourceRejectsWhenSlotsFull)
 
 TEST(RunLoopTest, AddTimerRejectsWhenSlotsFull)
 {
-#if !defined(_WIN32)
-    GTEST_SKIP() << "WFMO slot limit is Win32-only";
+#if !defined(_WIN32) || defined(VORTEX_BACKEND_IOCP)
+    GTEST_SKIP() << "WFMO slot limit is Win32-WFMO-specific";
 #else
     RunLoop loop;
     loop.init("SlotFullTmr");
@@ -789,8 +789,8 @@ TEST(RunLoopTest, AddTimerRejectsWhenSlotsFull)
 
 TEST(RunLoopTest, CombinedSourceTimerSlotLimit)
 {
-#if !defined(_WIN32)
-    GTEST_SKIP() << "WFMO slot limit is Win32-only";
+#if !defined(_WIN32) || defined(VORTEX_BACKEND_IOCP)
+    GTEST_SKIP() << "WFMO slot limit is Win32-WFMO-specific";
 #else
     RunLoop loop;
     loop.init("SlotCombo");
@@ -839,8 +839,8 @@ TEST(RunLoopTest, CombinedSourceTimerSlotLimit)
 
 TEST(RunLoopTest, SourceAfterTimerRemovalSucceeds)
 {
-#if !defined(_WIN32)
-    GTEST_SKIP() << "WFMO slot limit is Win32-only";
+#if !defined(_WIN32) || defined(VORTEX_BACKEND_IOCP)
+    GTEST_SKIP() << "WFMO slot limit is Win32-WFMO-specific";
 #else
     RunLoop loop;
     loop.init("SlotFree");
@@ -894,8 +894,8 @@ TEST(RunLoopTest, SourceAfterTimerRemovalSucceeds)
 
 TEST(RunLoopTest, ReplaceSourceDoesNotConsumeSlot)
 {
-#if !defined(_WIN32)
-    GTEST_SKIP() << "WFMO slot limit is Win32-only";
+#if !defined(_WIN32) || defined(VORTEX_BACKEND_IOCP)
+    GTEST_SKIP() << "WFMO slot limit is Win32-WFMO-specific";
 #else
     RunLoop loop;
     loop.init("ReplaceSlot");

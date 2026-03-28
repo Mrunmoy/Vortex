@@ -20,4 +20,4 @@ find_package(Threads REQUIRED)
 target_link_libraries(runloop_tests PRIVATE vortex GTest::gtest_main Threads::Threads)
 
 include(GoogleTest)
-gtest_discover_tests(runloop_tests)
+gtest_discover_tests(runloop_tests DISCOVERY_MODE PRE_TEST)

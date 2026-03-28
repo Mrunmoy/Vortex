@@ -65,3 +65,4 @@ dist/
 vortex-sdk-*
 *.tar.gz
 CODEX_INSTRUCTIONS.md
+build-tsan/

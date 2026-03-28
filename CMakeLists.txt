@@ -23,7 +23,7 @@ else()
     set(_backend "stub")
 endif()
 
-set(_valid_backends epoll kqueue win32 stub)
+set(_valid_backends epoll kqueue win32 win32_iocp stub)
 if(NOT _backend IN_LIST _valid_backends)
     message(FATAL_ERROR "Vortex: unknown backend '${_backend}'. "
                         "Valid options: ${_valid_backends}")
@@ -38,7 +38,11 @@ function(vortex_configure_target target_name)
     )
     target_compile_features(${target_name} PUBLIC cxx_std_17)
 
-    if(NOT _backend STREQUAL "win32")
+    if(_backend STREQUAL "win32_iocp")
+        target_compile_definitions(${target_name} PUBLIC VORTEX_BACKEND_IOCP=1)
+    endif()
+
+    if(NOT _backend STREQUAL "win32" AND NOT _backend STREQUAL "win32_iocp")
         find_package(Threads REQUIRED)
         target_link_libraries(${target_name} PRIVATE Threads::Threads)
     endif()
@@ -62,6 +66,14 @@ set_target_properties(vortex_shared PROPERTIES
     SOVERSION   ${PROJECT_VERSION_MAJOR}
 )
 
+# On Windows MSVC the import library (vortex.lib from vortex_shared) collides
+# with the static library (vortex.lib from vortex). Separate them.
+if(MSVC)
+    set_target_properties(vortex_shared PROPERTIES
+        ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/implib
+    )
+endif()
+
 include(GNUInstallDirs)
 install(TARGETS vortex vortex_shared
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
@@ -73,7 +85,7 @@ install(FILES inc/vortex.h
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )
 
-if(NOT _backend STREQUAL "win32")
+if(NOT _backend STREQUAL "win32" AND NOT _backend STREQUAL "win32_iocp")
     set(VORTEX_THREAD_LIBS "-lpthread")
 else()
     set(VORTEX_THREAD_LIBS "")

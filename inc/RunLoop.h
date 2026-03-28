@@ -84,10 +84,9 @@ namespace vortex
         /// error or hangup (EPOLLHUP/EPOLLERR on Linux, EV_EOF on macOS).
         /// The source is automatically removed after `onError` fires.
         ///
-        /// **Win32 WFMO limitation:** WaitForMultipleObjects cannot
-        /// distinguish data-ready from error/hangup, so neither `onError`
-        /// nor auto-removal occurs on the WFMO backend.  Full error-callback
-        /// support requires the planned IOCP backend (Phase 5c).
+        /// **Win32 limitation:** Neither the WFMO nor the IOCP backend can
+        /// distinguish data-ready from error/hangup for waitable kernel
+        /// objects, so `onError` is never fired on Windows.
         void addSource(NativeHandle handle, std::function<void()> handler,
                        std::function<void()> onError);
 
@@ -140,6 +139,9 @@ namespace vortex
         {
             std::function<void()> handler;
             std::function<void()> onError;
+#if defined(_WIN32)
+            void *context = nullptr;
+#endif
         };
         std::unordered_map<NativeHandle, SourceEntry> m_sources;
 
@@ -162,6 +164,9 @@ namespace vortex
         std::atomic<TimerId> m_nextTimerId{1};
 #if defined(_WIN32)
         std::vector<void *> m_retiredTimerHandles;
+        std::vector<void *> m_retiredSourceContexts;
+        void dispatchSource(void *ctx);
+        void dispatchTimer(void *ctx);
 #endif
     };
 
