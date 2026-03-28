@@ -14,14 +14,21 @@
 //   - Callables: enqueued to m_postQueue, wakeup posts to IOCP
 //   - Wakeup: PostQueuedCompletionStatus with kKeyWakeup
 //
-// Context lifetime:
-//   SourceContext* is stored in SourceEntry.context. Ownership transfers
-//   to m_retiredSourceContexts on removeSource, freed in Phase 1.
-//   TimerContext* is stored in TimerEntry.handle. On removeTimer, the
-//   threadpool timer is cancelled and the context moves to
-//   m_retiredTimerHandles. Phase 1 closes the TP resource but keeps
-//   the allocation alive. Stale completions in Phase 4 delete the
-//   context; the destructor frees any remaining.
+// Context lifetime — unified zombie pattern:
+//   Both SourceContext and TimerContext follow a two-phase retirement:
+//
+//   1. removeSource/removeTimer: Cancel the OS resource (non-blocking),
+//      move context to the retired list as a "zombie".
+//   2. Phase 1 (run loop top): Synchronize with OS callbacks
+//      (UnregisterWaitEx/WaitForThreadpoolTimerCallbacks) and mark the
+//      context as "synchronized" (waitHandle=nullptr / tpTimer=nullptr).
+//      Contexts that were ALREADY synchronized on a prior iteration
+//      are deleted (they've had ≥1 GQCS cycle to drain stale completions).
+//   3. Phase 4 (dispatch): If a stale completion arrives for a zombie,
+//      delete the context immediately (fast path).
+//
+//   This guarantees that no context is freed while a stale IOCP
+//   completion or threadpool callback can still reference it.
 
 #if defined(_WIN32)
 
@@ -108,7 +115,7 @@ RunLoop::~RunLoop()
         stop();
     }
 
-    // Unregister source waits and free contexts.
+    // Synchronously unregister source waits and free all contexts.
     {
         std::lock_guard<std::mutex> lock(m_sourcesMutex);
         for (auto &[h, entry] : m_sources)
@@ -125,15 +132,19 @@ RunLoop::~RunLoop()
         }
         m_sources.clear();
 
-        // Free retired source contexts.
         for (void *p : m_retiredSourceContexts)
         {
-            delete static_cast<SourceContext *>(p);
+            auto *ctx = static_cast<SourceContext *>(p);
+            if (ctx->waitHandle)
+            {
+                UnregisterWaitEx(ctx->waitHandle, INVALID_HANDLE_VALUE);
+            }
+            delete ctx;
         }
         m_retiredSourceContexts.clear();
     }
 
-    // Cancel and close timer threadpool timers.
+    // Cancel, close, and free all timer contexts.
     {
         std::lock_guard<std::mutex> lock(m_timersMutex);
         for (auto &[id, entry] : m_timers)
@@ -147,7 +158,6 @@ RunLoop::~RunLoop()
         }
         m_timers.clear();
 
-        // Free retired timer contexts.
         for (void *h : m_retiredTimerHandles)
         {
             auto *ctx = static_cast<TimerContext *>(h);
@@ -218,26 +228,50 @@ void RunLoop::run()
 
         while (!m_stopRequested.load(std::memory_order_acquire))
         {
-            // ── Phase 1: Retire timer TP resources & free source contexts
-            {
-                std::lock_guard<std::mutex> lock(m_timersMutex);
-                for (void *h : m_retiredTimerHandles)
-                {
-                    // Close the TP resource but keep the allocation alive.
-                    // A stale IOCP completion may still reference the
-                    // TimerContext*. Phase 4 frees it when consumed.
-                    closeTimerResource(static_cast<TimerContext *>(h));
-                }
-                // Don't clear — entries move to a "zombie" state.
-                // Phase 4 will erase + delete individual entries.
-            }
+            // ── Phase 1: Retire zombie contexts ─────────────────────
+            // Two-pass: synchronize OS resources, then free contexts
+            // that were already synchronized on a PRIOR iteration
+            // (giving stale completions ≥1 GQCS cycle to drain).
             {
                 std::lock_guard<std::mutex> lock(m_sourcesMutex);
-                for (void *p : m_retiredSourceContexts)
+                auto sit = m_retiredSourceContexts.begin();
+                while (sit != m_retiredSourceContexts.end())
                 {
-                    delete static_cast<SourceContext *>(p);
+                    auto *ctx = static_cast<SourceContext *>(*sit);
+                    if (ctx->waitHandle != nullptr)
+                    {
+                        // First visit: block until TP callback completes.
+                        UnregisterWaitEx(ctx->waitHandle, INVALID_HANDLE_VALUE);
+                        ctx->waitHandle = nullptr;
+                        ++sit;
+                    }
+                    else
+                    {
+                        // Already synchronized on a prior iteration.
+                        delete ctx;
+                        sit = m_retiredSourceContexts.erase(sit);
+                    }
                 }
-                m_retiredSourceContexts.clear();
+            }
+            {
+                std::lock_guard<std::mutex> lock(m_timersMutex);
+                auto tit = m_retiredTimerHandles.begin();
+                while (tit != m_retiredTimerHandles.end())
+                {
+                    auto *ctx = static_cast<TimerContext *>(*tit);
+                    if (ctx->tpTimer != nullptr)
+                    {
+                        // First visit: close TP resource.
+                        closeTimerResource(ctx);
+                        ++tit;
+                    }
+                    else
+                    {
+                        // Already closed on a prior iteration.
+                        delete ctx;
+                        tit = m_retiredTimerHandles.erase(tit);
+                    }
+                }
             }
 
             // ── Phase 2: Drain posted callables ─────────────────────
@@ -342,20 +376,18 @@ void RunLoop::addSource(NativeHandle handle, std::function<void()> handler,
 {
     auto *ctx = new SourceContext{m_pollHandle, handle, nullptr};
 
+    // Hold lock across map insert AND RegisterWaitForSingleObject to
+    // prevent a concurrent removeSource from seeing the entry before
+    // the wait is registered (Findings 3).
+    std::lock_guard<std::mutex> lock(m_sourcesMutex);
+
+    auto it = m_sources.find(handle);
+    if (it != m_sources.end())
     {
-        std::lock_guard<std::mutex> lock(m_sourcesMutex);
-
-        auto it = m_sources.find(handle);
-        if (it != m_sources.end())
-        {
-            // Replace handler but keep existing context/registration.
-            it->second.handler = std::move(handler);
-            it->second.onError = std::move(onError);
-            delete ctx;
-            return;
-        }
-
-        m_sources[handle] = {std::move(handler), std::move(onError), ctx};
+        it->second.handler = std::move(handler);
+        it->second.onError = std::move(onError);
+        delete ctx;
+        return;
     }
 
     HANDLE waitHandle = nullptr;
@@ -367,17 +399,17 @@ void RunLoop::addSource(NativeHandle handle, std::function<void()> handler,
             INFINITE,
             WT_EXECUTEONLYONCE))
     {
-        {
-            std::lock_guard<std::mutex> lock(m_sourcesMutex);
-            m_sources.erase(handle);
-        }
         delete ctx;
         throw std::system_error(static_cast<int>(GetLastError()),
                                 std::system_category(),
                                 "RunLoop::addSource: RegisterWaitForSingleObject failed");
     }
     ctx->waitHandle = waitHandle;
+    m_sources[handle] = {std::move(handler), std::move(onError), ctx};
 
+    // wakeup() after lock release (RAII destructor).
+    // Note: wakeup() is safe to call with m_sourcesMutex held since
+    // it only touches m_pollHandle (IOCP), not any mutex.
     wakeup();
 }
 
@@ -385,29 +417,24 @@ void RunLoop::addSource(NativeHandle handle, std::function<void()> handler,
 
 void RunLoop::removeSource(NativeHandle handle)
 {
-    std::lock_guard<std::mutex> lock(m_sourcesMutex);
-    auto it = m_sources.find(handle);
-    if (it == m_sources.end())
-        return;
-
-    void *rawCtx = it->second.context;
-    m_sources.erase(it);
-
-    if (rawCtx != nullptr)
     {
-        auto *ctx = static_cast<SourceContext *>(rawCtx);
-        if (ctx->waitHandle)
+        std::lock_guard<std::mutex> lock(m_sourcesMutex);
+        auto it = m_sources.find(handle);
+        if (it == m_sources.end())
+            return;
+
+        void *rawCtx = it->second.context;
+        m_sources.erase(it);
+
+        if (rawCtx != nullptr)
         {
-            // Non-blocking unregister. The callback may still post a
-            // stale IOCP completion; dispatch ignores it (source gone
-            // from map) and frees the context there.
-            UnregisterWait(ctx->waitHandle);
-            ctx->waitHandle = nullptr;
+            // Defer to retired list. Phase 1 will synchronize with the
+            // TP callback (blocking UnregisterWaitEx), and Phase 4 or
+            // Phase 1 (next iteration) will free the allocation.
+            m_retiredSourceContexts.push_back(rawCtx);
         }
-        // Defer delete — the callback might still be running on the
-        // threadpool and accessing ctx->iocp right now.
-        m_retiredSourceContexts.push_back(rawCtx);
     }
+    wakeup();
 }
 
 // ── addTimer ────────────────────────────────────────────────────────
@@ -463,8 +490,8 @@ void RunLoop::removeTimer(TimerId id)
     if (h != nullptr)
     {
         auto *ctx = static_cast<TimerContext *>(h);
-        // Cancel future firings. TP resource is closed in Phase 1;
-        // the allocation lives until the stale completion is consumed.
+        // Cancel future firings. Phase 1 will close the TP resource;
+        // Phase 4 or Phase 1 (next iteration) will free the allocation.
         SetThreadpoolTimer(ctx->tpTimer, nullptr, 0, 0);
         m_retiredTimerHandles.push_back(h);
     }
@@ -478,7 +505,7 @@ void RunLoop::dispatchSource(void *rawCtx)
     auto *ctx = static_cast<SourceContext *>(rawCtx);
     NativeHandle srcHandle = ctx->sourceHandle;
 
-    // Look up handler and verify context identity.
+    // Look up handler and verify context identity under lock.
     std::function<void()> handler;
     bool isCurrentCtx = false;
     {
@@ -491,11 +518,17 @@ void RunLoop::dispatchSource(void *rawCtx)
         }
     }
 
-    // Stale completion for a removed/replaced source.
+    // Stale completion for a removed/replaced source — free the zombie.
     if (!isCurrentCtx)
     {
-        // Context was already moved to m_retiredSourceContexts
-        // by removeSource or replaced by addSource. Nothing to do.
+        std::lock_guard<std::mutex> lock(m_sourcesMutex);
+        auto rit = std::find(m_retiredSourceContexts.begin(),
+                             m_retiredSourceContexts.end(), rawCtx);
+        if (rit != m_retiredSourceContexts.end())
+        {
+            m_retiredSourceContexts.erase(rit);
+            delete ctx;
+        }
         return;
     }
 
@@ -504,52 +537,45 @@ void RunLoop::dispatchSource(void *rawCtx)
         handler();
     }
 
-    // Re-register the wait if source still exists with same context.
-    bool rearm = false;
+    // Re-register the wait under lock to prevent TOCTOU race with
+    // removeSource (Finding 2).
+    std::function<void()> errorCb;
+    bool rearmFailed = false;
     {
         std::lock_guard<std::mutex> lock(m_sourcesMutex);
         auto it = m_sources.find(srcHandle);
-        rearm = (it != m_sources.end() && it->second.context == ctx);
+        if (it != m_sources.end() && it->second.context == ctx)
+        {
+            HANDLE newWaitHandle = nullptr;
+            if (RegisterWaitForSingleObject(
+                    &newWaitHandle,
+                    static_cast<HANDLE>(srcHandle),
+                    sourceWaitCallback,
+                    ctx,
+                    INFINITE,
+                    WT_EXECUTEONLYONCE))
+            {
+                ctx->waitHandle = newWaitHandle;
+            }
+            else
+            {
+                errorCb = it->second.onError;
+                it->second.context = nullptr;
+                m_sources.erase(it);
+                rearmFailed = true;
+            }
+        }
+        // else: source removed during handler — ownership in retired list
     }
 
-    if (rearm)
+    // Fire onError outside lock to prevent deadlock.
+    if (rearmFailed)
     {
-        HANDLE newWaitHandle = nullptr;
-        if (RegisterWaitForSingleObject(
-                &newWaitHandle,
-                static_cast<HANDLE>(srcHandle),
-                sourceWaitCallback,
-                ctx,
-                INFINITE,
-                WT_EXECUTEONLYONCE))
+        if (errorCb)
         {
-            ctx->waitHandle = newWaitHandle;
+            errorCb();
         }
-        else
-        {
-            // Re-arm failed. Remove the dead source and fire onError.
-            std::function<void()> errorCb;
-            {
-                std::lock_guard<std::mutex> lock(m_sourcesMutex);
-                auto it = m_sources.find(srcHandle);
-                if (it != m_sources.end() && it->second.context == ctx)
-                {
-                    errorCb = it->second.onError;
-                    it->second.context = nullptr;
-                    m_sources.erase(it);
-                }
-            }
-            if (errorCb)
-            {
-                errorCb();
-            }
-            delete ctx;
-        }
-    }
-    else
-    {
-        // Source was removed while handler was running.
-        // Context ownership transferred to m_retiredSourceContexts.
+        delete ctx;
     }
 }
 
@@ -569,9 +595,9 @@ void RunLoop::dispatchTimer(void *rawCtx)
         }
         else
         {
-            // Stale completion for a removed timer. Free the zombie.
+            // Stale completion for a removed timer — free the zombie.
             auto rit = std::find(m_retiredTimerHandles.begin(),
-                                 m_retiredTimerHandles.end(), ctx);
+                                 m_retiredTimerHandles.end(), rawCtx);
             if (rit != m_retiredTimerHandles.end())
             {
                 m_retiredTimerHandles.erase(rit);
