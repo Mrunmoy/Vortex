@@ -40,12 +40,12 @@ exposes `init()`, `run()`, `stop()`, `executeOnRunLoop()`, `addSource()` /
 (`vortex.h`) that wraps the C++ class behind opaque handles, suitable for FFI
 and C-only codebases.
 
-Underneath the public interface, four platform backends implement the actual
-OS polling: **epoll** (Linux), **kqueue** (macOS/BSD), **Win32 WFMO**
-(Windows), and a **stub** backend (for platforms without native polling or for
-unit testing on unsupported hosts). The backend is selected at compile time via
-preprocessor guards. All backends present the same internal interface to the
-rest of the class, so the core run-loop logic is written once.
+Underneath the public interface, three platform backends implement the actual
+OS polling: **epoll** (Linux), **kqueue** (macOS/BSD), and **Win32 IOCP**
+(Windows). A **stub** backend is available for platforms without native
+polling or for unit testing on unsupported hosts. The backend is selected at
+compile time via preprocessor guards. All backends present the same internal
+interface to the rest of the class, so the core run-loop logic is written once.
 
 The key internal data structures are a mutex-protected post queue (a
 `std::vector` of callables), a mutex-protected source map (native handle to
@@ -68,7 +68,7 @@ pattern ensures the mutex is held for a constant, tiny duration regardless of
 how many callables have accumulated.
 
 **Step 2 -- Block on the OS.** The loop calls the platform poll function
-(`epoll_wait`, `kevent`, `WaitForMultipleObjects`, or a stub sleep). The
+(`epoll_wait`, `kevent`, `GetQueuedCompletionStatusEx`, or a stub sleep). The
 timeout is derived from the nearest pending timer, or infinite if no timers
 exist. The loop does not busy-spin.
 
@@ -106,7 +106,7 @@ from `EPOLL_CTL_MOD` and falls back to `EPOLL_CTL_ADD` to self-heal.
 An overload accepts a second callback, `onError`, which fires when the source
 encounters a hangup or error condition. After `onError` fires, the source is
 automatically removed. This is useful for detecting peer disconnection on
-socket file descriptors. Note that the Win32 WFMO backend cannot distinguish
+socket file descriptors. Note that the Win32 IOCP backend cannot distinguish
 data-ready from error states, so `onError` is not supported there.
 
 `removeSource(handle)` stops watching the handle. It is safe to call even if
@@ -161,13 +161,16 @@ limit on the number of watched file descriptors.
 `EVFILT_TIMER` for timers. Supports error detection via `EV_EOF`. Like epoll,
 there is no practical fd limit.
 
-**Win32 WFMO (Windows).** Uses `WaitForMultipleObjects` with a manual-reset
-event for wakeup and waitable timer objects. This backend has an inherent
-limitation: WFMO supports at most `MAXIMUM_WAIT_OBJECTS` (64) handles, and
-one is reserved for the wakeup event, leaving a budget of 63 combined sources
-and timers. WFMO also cannot distinguish error/hangup from normal signaling,
-so the `onError` callback is not fired. A future IOCP-based backend is
-planned to lift these restrictions.
+**Win32 IOCP (Windows).** Uses an I/O Completion Port as the central
+multiplexer. Sources are registered via `RegisterWaitForSingleObject`, which
+routes waitable kernel object signals to the IOCP as completion packets.
+Timers use Windows threadpool timers (`CreateThreadpoolTimer`) which also post
+completions to the IOCP. The wakeup mechanism is `PostQueuedCompletionStatus`.
+Dispatch uses `GetQueuedCompletionStatusEx` with a 32-entry batch to amortize
+syscall overhead. IOCP has no practical limit on the number of sources or
+timers, and dispatch is fair (no index-based starvation). IOCP cannot
+distinguish error/hangup from normal signaling, so the `onError` callback is
+not fired on Windows.
 
 **Stub (fallback).** Compiled when no supported platform is detected. The
 post queue and stop mechanisms work normally, but sources are stored without

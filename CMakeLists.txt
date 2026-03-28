@@ -11,8 +11,6 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 # ── Platform backend selection ───────────────────────────────────────
 if(DEFINED VORTEX_BACKEND)
     set(_backend ${VORTEX_BACKEND})
-elseif(DEFINED MS_RUNLOOP_BACKEND)
-    set(_backend ${MS_RUNLOOP_BACKEND})
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(_backend "epoll")
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
@@ -23,7 +21,7 @@ else()
     set(_backend "stub")
 endif()
 
-set(_valid_backends epoll kqueue win32 win32_iocp stub)
+set(_valid_backends epoll kqueue win32_iocp stub)
 if(NOT _backend IN_LIST _valid_backends)
     message(FATAL_ERROR "Vortex: unknown backend '${_backend}'. "
                         "Valid options: ${_valid_backends}")
@@ -42,7 +40,7 @@ function(vortex_configure_target target_name)
         target_compile_definitions(${target_name} PUBLIC VORTEX_BACKEND_IOCP=1)
     endif()
 
-    if(NOT _backend STREQUAL "win32" AND NOT _backend STREQUAL "win32_iocp")
+    if(NOT _backend STREQUAL "win32_iocp")
         find_package(Threads REQUIRED)
         target_link_libraries(${target_name} PRIVATE Threads::Threads)
     endif()
@@ -85,7 +83,7 @@ install(FILES inc/vortex.h
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )
 
-if(NOT _backend STREQUAL "win32" AND NOT _backend STREQUAL "win32_iocp")
+if(NOT _backend STREQUAL "win32_iocp")
     set(VORTEX_THREAD_LIBS "-lpthread")
 else()
     set(VORTEX_THREAD_LIBS "")

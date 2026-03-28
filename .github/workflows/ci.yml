@@ -58,12 +58,6 @@ jobs:
   build-windows:
     runs-on: windows-latest
     timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        backend: [win32_iocp, win32]
-
-    name: build-windows (${{ matrix.backend }})
 
     steps:
       - uses: actions/checkout@v4
@@ -72,7 +66,7 @@ jobs:
 
       - name: Configure
         shell: bash
-        run: cmake -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Debug -DVORTEX_BACKEND=${{ matrix.backend }}
+        run: cmake -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Debug
 
       - name: Build
         shell: bash

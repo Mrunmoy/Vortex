@@ -73,9 +73,8 @@ namespace vortex
         //
         // Backend-specific:
         //   epoll/kqueue: monitors fd for readability (EPOLLIN / EVFILT_READ)
-        //   win32: handle must be a waitable kernel object (event, semaphore,
-        //          etc.); pipes/sockets require overlapped I/O instead.
-        //          Max 63 combined sources + timers (MAXIMUM_WAIT_OBJECTS - 1).
+        //   win32_iocp: handle must be a waitable kernel object (event,
+        //               semaphore, etc.); pipes/sockets require overlapped I/O.
         //   stub: handler is stored but never fired (no OS polling).
         void addSource(NativeHandle handle, std::function<void()> handler);
 
@@ -84,9 +83,9 @@ namespace vortex
         /// error or hangup (EPOLLHUP/EPOLLERR on Linux, EV_EOF on macOS).
         /// The source is automatically removed after `onError` fires.
         ///
-        /// **Win32 limitation:** Neither the WFMO nor the IOCP backend can
-        /// distinguish data-ready from error/hangup for waitable kernel
-        /// objects, so `onError` is never fired on Windows.
+        /// **Win32 limitation:** The IOCP backend cannot distinguish
+        /// data-ready from error/hangup for waitable kernel objects, so
+        /// `onError` is never fired on Windows.
         void addSource(NativeHandle handle, std::function<void()> handler,
                        std::function<void()> onError);
 
