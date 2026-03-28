@@ -1734,11 +1734,11 @@ TEST(RunLoopTest, StressMixedWorkload)
     poster.join();
     timerAdder.join();
 
-    for (int i = 0; i < 800 && (postCount.load() < POSTS || timerCount.load() < 1); ++i)
+    for (int i = 0; i < 800 && (postCount.load() < POSTS || timerCount.load() < TIMER_OPS / 2); ++i)
         std::this_thread::sleep_for(10ms);
 
     EXPECT_EQ(postCount.load(), POSTS);
-    EXPECT_GE(timerCount.load(), 1);
+    EXPECT_GE(timerCount.load(), TIMER_OPS / 2);
 }
 
 TEST(RunLoopTest, StopFromTimerHandler)
@@ -1795,10 +1795,10 @@ TEST(RunLoopTest, RepeatingTimerDoesNotFireEarly)
     constexpr uint32_t intervalMs = 50;
     auto startTime = std::chrono::steady_clock::now();
     std::atomic<bool> fired{false};
-    std::chrono::steady_clock::time_point fireTime;
+    std::atomic<int64_t> fireTimeNs{0};
 
     loop.addTimer(intervalMs, false, [&] {
-        fireTime = std::chrono::steady_clock::now();
+        fireTimeNs.store(std::chrono::steady_clock::now().time_since_epoch().count());
         fired.store(true);
     });
 
@@ -1808,8 +1808,9 @@ TEST(RunLoopTest, RepeatingTimerDoesNotFireEarly)
         std::this_thread::sleep_for(5ms);
 
     ASSERT_TRUE(fired.load());
+    auto fireTime = std::chrono::steady_clock::time_point(
+        std::chrono::steady_clock::duration(fireTimeNs.load()));
     auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(fireTime - startTime);
-    // Allow 15ms tolerance for scheduling jitter, but must not fire way too early
     EXPECT_GE(elapsed.count(), intervalMs - 15)
         << "Timer fired " << elapsed.count() << "ms after start, expected >= " << (intervalMs - 15);
 }
@@ -1836,9 +1837,11 @@ TEST(RunLoopTest, ExceptionFromTimerHandlerPropagates)
     EXPECT_FALSE(loop.isRunning());
 }
 
-#if !defined(_WIN32)
 TEST(RunLoopTest, ExceptionFromSourceHandlerPropagates)
 {
+#if defined(_WIN32)
+    GTEST_SKIP() << "CreatePipe handles not waitable on Win32";
+#else
     RunLoop loop;
     loop.init("ExSrc");
 
@@ -1854,8 +1857,8 @@ TEST(RunLoopTest, ExceptionFromSourceHandlerPropagates)
     EXPECT_THROW(loop.run(), std::runtime_error);
     EXPECT_FALSE(loop.isRunning());
     closePipe(readFd, writeFd);
-}
 #endif
+}
 
 TEST(RunLoopTest, LoopRestartableAfterException)
 {
@@ -1969,15 +1972,20 @@ TEST(RunLoopTest, StressTimerChurnHighScale)
     });
     churner.join();
 
-    std::this_thread::sleep_for(500ms);
+    // WFMO safety: at most N/10 = 50 live timers; well under the 63-slot limit.
+    constexpr int KEPT = N / 10;
+    for (int i = 0; i < 600 && fireCount.load() < KEPT / 2; ++i)
+        std::this_thread::sleep_for(10ms);
 
-    EXPECT_GE(fireCount.load(), 1);
+    EXPECT_GE(fireCount.load(), KEPT / 2);
     EXPECT_LE(fireCount.load(), N);
 }
 
-#if !defined(_WIN32)
 TEST(RunLoopTest, StressSourceChurn)
 {
+#if defined(_WIN32)
+    GTEST_SKIP() << "CreatePipe handles not waitable on Win32";
+#else
     RunLoop loop;
     loop.init("SrcChurn");
 
@@ -2003,8 +2011,8 @@ TEST(RunLoopTest, StressSourceChurn)
     }
 
     EXPECT_GE(fireCount.load(), CYCLES / 2);
-}
 #endif
+}
 
 // ── Category 6: Source Tests (pipe-gated, skip on Win32) ─────────────
 
