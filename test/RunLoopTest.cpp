@@ -1648,6 +1648,361 @@ TEST(RunLoopTest, StressStartStop)
     }
 }
 
+// ── Category 5b: Advanced Stress & Concurrency Tests ─────────────────
+
+TEST(RunLoopTest, StressConcurrentTimerAddRemove)
+{
+    RunLoop loop;
+    loop.init("ConcTmr");
+
+    RunLoopGuard guard(loop);
+    std::this_thread::sleep_for(10ms);
+
+    constexpr int NUM_THREADS = 4;
+    constexpr int OPS_PER_THREAD = 200;
+    std::atomic<int> fireCount{0};
+
+    std::vector<std::thread> threads;
+    for (int t = 0; t < NUM_THREADS; ++t)
+    {
+        threads.emplace_back([&] {
+            for (int i = 0; i < OPS_PER_THREAD; ++i)
+            {
+                auto id = loop.addTimer(5, false, [&] { fireCount.fetch_add(1); });
+                if (i % 3 == 0)
+                    loop.removeTimer(id);
+            }
+        });
+    }
+
+    for (auto &th : threads)
+        th.join();
+
+    std::this_thread::sleep_for(500ms);
+
+    int total = NUM_THREADS * OPS_PER_THREAD;
+    int removed = total / 3;
+    EXPECT_GE(fireCount.load(), (total - removed) / 2);
+    EXPECT_LE(fireCount.load(), total);
+}
+
+TEST(RunLoopTest, StressStartStopManyCycles)
+{
+    RunLoop loop;
+    loop.init("ManyCyc");
+
+    constexpr int CYCLES = 50;
+
+    for (int i = 0; i < CYCLES; ++i)
+    {
+        std::thread t([&] { loop.run(); });
+        for (int j = 0; j < 500 && !loop.isRunning(); ++j)
+            std::this_thread::sleep_for(1ms);
+        loop.stop();
+        t.join();
+        EXPECT_FALSE(loop.isRunning()) << "Cycle " << i;
+    }
+}
+
+TEST(RunLoopTest, StressMixedWorkload)
+{
+    RunLoop loop;
+    loop.init("Mixed");
+
+    std::atomic<int> postCount{0};
+    std::atomic<int> timerCount{0};
+
+    RunLoopGuard guard(loop);
+    std::this_thread::sleep_for(10ms);
+
+    constexpr int N = 200;
+
+    // Thread 1: posts callables
+    std::thread poster([&] {
+        for (int i = 0; i < N; ++i)
+            loop.executeOnRunLoop([&] { postCount.fetch_add(1); });
+    });
+
+    // Thread 2: churns timers
+    std::thread timerChurner([&] {
+        for (int i = 0; i < N; ++i)
+        {
+            auto id = loop.addTimer(1, false, [&] { timerCount.fetch_add(1); });
+            if (i % 4 == 0)
+                loop.removeTimer(id);
+        }
+    });
+
+    poster.join();
+    timerChurner.join();
+
+    for (int i = 0; i < 400 && postCount.load() < N; ++i)
+        std::this_thread::sleep_for(10ms);
+
+    EXPECT_EQ(postCount.load(), N);
+    EXPECT_GE(timerCount.load(), 1);
+}
+
+TEST(RunLoopTest, StopFromTimerHandler)
+{
+    RunLoop loop;
+    loop.init("StopTmr");
+
+    std::atomic<bool> stopped{false};
+    loop.addTimer(10, false, [&] {
+        loop.stop();
+        stopped.store(true);
+    });
+
+    std::thread t([&] { loop.run(); });
+    t.join();
+
+    EXPECT_TRUE(stopped.load());
+    EXPECT_FALSE(loop.isRunning());
+}
+
+TEST(RunLoopTest, StopFromSourceHandler)
+{
+#if defined(_WIN32)
+    GTEST_SKIP() << "CreatePipe handles not waitable on Win32";
+#else
+    RunLoop loop;
+    loop.init("StopSrc");
+
+    auto [readFd, writeFd] = makePipe();
+    std::atomic<bool> stopped{false};
+
+    loop.addSource(readFd, [&] {
+        drainPipe(readFd);
+        loop.stop();
+        stopped.store(true);
+    });
+
+    std::thread t([&] { loop.run(); });
+    std::this_thread::sleep_for(20ms);
+    writeByte(writeFd);
+    t.join();
+
+    EXPECT_TRUE(stopped.load());
+    EXPECT_FALSE(loop.isRunning());
+    closePipe(readFd, writeFd);
+#endif
+}
+
+TEST(RunLoopTest, RepeatingTimerDoesNotFireEarly)
+{
+    RunLoop loop;
+    loop.init("NoEarly");
+
+    constexpr uint32_t intervalMs = 50;
+    auto startTime = std::chrono::steady_clock::now();
+    std::atomic<bool> fired{false};
+    std::chrono::steady_clock::time_point fireTime;
+
+    loop.addTimer(intervalMs, false, [&] {
+        fireTime = std::chrono::steady_clock::now();
+        fired.store(true);
+    });
+
+    RunLoopGuard guard(loop);
+
+    for (int i = 0; i < 400 && !fired.load(); ++i)
+        std::this_thread::sleep_for(5ms);
+
+    ASSERT_TRUE(fired.load());
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(fireTime - startTime);
+    // Allow 15ms tolerance for scheduling jitter, but must not fire way too early
+    EXPECT_GE(elapsed.count(), intervalMs - 15)
+        << "Timer fired " << elapsed.count() << "ms after start, expected >= " << (intervalMs - 15);
+}
+
+TEST(RunLoopTest, ExceptionFromCallablePropagates)
+{
+    RunLoop loop;
+    loop.init("ExCall");
+
+    loop.executeOnRunLoop([] { throw std::runtime_error("callable boom"); });
+
+    EXPECT_THROW(loop.run(), std::runtime_error);
+    EXPECT_FALSE(loop.isRunning());
+}
+
+TEST(RunLoopTest, ExceptionFromTimerHandlerPropagates)
+{
+    RunLoop loop;
+    loop.init("ExTimer");
+
+    loop.addTimer(1, false, [] { throw std::runtime_error("timer boom"); });
+
+    EXPECT_THROW(loop.run(), std::runtime_error);
+    EXPECT_FALSE(loop.isRunning());
+}
+
+#if !defined(_WIN32)
+TEST(RunLoopTest, ExceptionFromSourceHandlerPropagates)
+{
+    RunLoop loop;
+    loop.init("ExSrc");
+
+    auto [readFd, writeFd] = makePipe();
+
+    loop.addSource(readFd, [&] {
+        drainPipe(readFd);
+        throw std::runtime_error("source boom");
+    });
+
+    writeByte(writeFd);
+
+    EXPECT_THROW(loop.run(), std::runtime_error);
+    EXPECT_FALSE(loop.isRunning());
+    closePipe(readFd, writeFd);
+}
+#endif
+
+TEST(RunLoopTest, LoopRestartableAfterException)
+{
+    RunLoop loop;
+    loop.init("RestartEx");
+
+    // First run: exception
+    loop.executeOnRunLoop([] { throw std::runtime_error("first boom"); });
+    EXPECT_THROW(loop.run(), std::runtime_error);
+
+    // Second run: normal stop
+    std::atomic<bool> ok{false};
+    loop.executeOnRunLoop([&] {
+        ok.store(true);
+        loop.stop();
+    });
+    EXPECT_NO_THROW(loop.run());
+    EXPECT_TRUE(ok.load());
+}
+
+TEST(RunLoopTest, StressTimerIdsUniqueUnderContention)
+{
+    RunLoop loop;
+    loop.init("IdContest");
+
+    constexpr int NUM_THREADS = 4;
+    constexpr int TIMERS_PER_THREAD = 100;
+
+    std::mutex idsMutex;
+    std::set<RunLoop::TimerId> allIds;
+
+    std::vector<std::thread> threads;
+    for (int t = 0; t < NUM_THREADS; ++t)
+    {
+        threads.emplace_back([&] {
+            std::vector<RunLoop::TimerId> localIds;
+            localIds.reserve(TIMERS_PER_THREAD);
+            for (int i = 0; i < TIMERS_PER_THREAD; ++i)
+                localIds.push_back(loop.addTimer(100000, false, [] {}));
+
+            std::lock_guard<std::mutex> lock(idsMutex);
+            for (auto id : localIds)
+                allIds.insert(id);
+        });
+    }
+
+    for (auto &th : threads)
+        th.join();
+
+    EXPECT_EQ(allIds.size(), static_cast<size_t>(NUM_THREADS * TIMERS_PER_THREAD))
+        << "All timer IDs must be unique even under thread contention";
+
+    for (auto id : allIds)
+        loop.removeTimer(id);
+}
+
+TEST(RunLoopTest, PostHighThroughput)
+{
+    RunLoop loop;
+    loop.init("HighTP");
+
+    constexpr int NUM_THREADS = 50;
+    constexpr int POSTS_PER_THREAD = 2000;
+    constexpr int TOTAL = NUM_THREADS * POSTS_PER_THREAD;
+    std::atomic<int> count{0};
+
+    RunLoopGuard guard(loop);
+    std::this_thread::sleep_for(10ms);
+
+    std::vector<std::thread> threads;
+    for (int t = 0; t < NUM_THREADS; ++t)
+    {
+        threads.emplace_back([&] {
+            for (int i = 0; i < POSTS_PER_THREAD; ++i)
+                loop.executeOnRunLoop([&] { count.fetch_add(1); });
+        });
+    }
+
+    for (auto &th : threads)
+        th.join();
+
+    for (int i = 0; i < 1200 && count.load() < TOTAL; ++i)
+        std::this_thread::sleep_for(10ms);
+
+    EXPECT_EQ(count.load(), TOTAL);
+}
+
+TEST(RunLoopTest, StressTimerChurnHighScale)
+{
+    RunLoop loop;
+    loop.init("ChurnHi");
+
+    RunLoopGuard guard(loop);
+    std::this_thread::sleep_for(10ms);
+
+    constexpr int N = 500;
+    std::atomic<int> fireCount{0};
+
+    std::thread churner([&] {
+        for (int i = 0; i < N; ++i)
+        {
+            auto id = loop.addTimer(5, false, [&] { fireCount.fetch_add(1); });
+            if (i % 2 == 0)
+                loop.removeTimer(id);
+        }
+    });
+    churner.join();
+
+    std::this_thread::sleep_for(500ms);
+
+    EXPECT_GE(fireCount.load(), N / 4);
+    EXPECT_LE(fireCount.load(), N);
+}
+
+#if !defined(_WIN32)
+TEST(RunLoopTest, StressSourceChurn)
+{
+    RunLoop loop;
+    loop.init("SrcChurn");
+
+    RunLoopGuard guard(loop);
+    std::this_thread::sleep_for(10ms);
+
+    constexpr int CYCLES = 100;
+    std::atomic<int> fireCount{0};
+
+    for (int i = 0; i < CYCLES; ++i)
+    {
+        auto [readFd, writeFd] = makePipe();
+        loop.addSource(readFd, [&, readFd] {
+            drainPipe(readFd);
+            fireCount.fetch_add(1);
+        });
+
+        writeByte(writeFd);
+        std::this_thread::sleep_for(5ms);
+
+        loop.removeSource(readFd);
+        closePipe(readFd, writeFd);
+    }
+
+    EXPECT_GE(fireCount.load(), CYCLES / 2);
+}
+#endif
+
 // ── Category 6: Source Tests (pipe-gated, skip on Win32) ─────────────
 
 TEST(RunLoopTest, SourceDoesNotFireAfterRemove)
