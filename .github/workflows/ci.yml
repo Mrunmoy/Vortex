@@ -61,7 +61,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        backend: [win32, win32_iocp]
+        backend: [win32_iocp, win32]
 
     name: build-windows (${{ matrix.backend }})
 
