@@ -1195,3 +1195,602 @@ TEST(RunLoopTest, ErrorCallbackAutoRemovesSource)
     close(readFd);
 #endif
 }
+
+// ═══════════════════════════════════════════════════════════════════════
+// Behavioral Contract Tests — must pass on ALL backends (Phase A)
+// ═══════════════════════════════════════════════════════════════════════
+
+// ── Category 1: Lifecycle Edge Cases (all platforms) ─────────────────
+
+TEST(RunLoopTest, DoubleInitThrows)
+{
+    RunLoop loop;
+    loop.init("DoubleInit");
+    EXPECT_THROW(loop.init("DoubleInit2"), std::logic_error);
+}
+
+TEST(RunLoopTest, RemoveNonExistentSourceIsNoOp)
+{
+    RunLoop loop;
+    loop.init("NoSrc");
+
+#if defined(_WIN32)
+    HANDLE ev = CreateEventA(nullptr, FALSE, FALSE, nullptr);
+    ASSERT_NE(ev, nullptr);
+    EXPECT_NO_THROW(loop.removeSource(static_cast<RunLoop::NativeHandle>(ev)));
+    CloseHandle(ev);
+#else
+    EXPECT_NO_THROW(loop.removeSource(9999));
+#endif
+}
+
+TEST(RunLoopTest, RemoveNonExistentTimerIsNoOp)
+{
+    RunLoop loop;
+    loop.init("NoTimer");
+    EXPECT_NO_THROW(loop.removeTimer(999999));
+}
+
+TEST(RunLoopTest, DoubleRemoveTimerIsNoOp)
+{
+    RunLoop loop;
+    loop.init("DblRmTimer");
+
+    auto id = loop.addTimer(100000, false, [] {});
+    loop.removeTimer(id);
+    EXPECT_NO_THROW(loop.removeTimer(id));
+}
+
+TEST(RunLoopTest, StopIdempotent)
+{
+    RunLoop loop;
+    loop.init("StopIdem");
+
+    RunLoopGuard guard(loop);
+    std::this_thread::sleep_for(10ms);
+
+    loop.stop();
+    loop.stop();
+    loop.stop();
+}
+
+TEST(RunLoopTest, StopWithoutRun)
+{
+    RunLoop loop;
+    loop.init("StopNoRun");
+
+    loop.stop();
+
+    std::atomic<bool> done{false};
+    std::thread t([&] {
+        loop.run();
+        done.store(true);
+    });
+
+    for (int i = 0; i < 200 && !done.load(); ++i)
+        std::this_thread::sleep_for(5ms);
+
+    EXPECT_TRUE(done.load());
+    t.join();
+}
+
+// ── Category 2: Timer Contract Tests (all platforms) ─────────────────
+
+TEST(RunLoopTest, OneShotTimerFiresExactlyOnce)
+{
+    RunLoop loop;
+    loop.init("OneShotExact");
+
+    std::atomic<int> count{0};
+    loop.addTimer(10, false, [&] { count.fetch_add(1); });
+
+    RunLoopGuard guard(loop);
+
+    for (int i = 0; i < 200 && count.load() < 1; ++i)
+        std::this_thread::sleep_for(5ms);
+
+    EXPECT_EQ(count.load(), 1);
+
+    // Wait 5x the interval — must not fire again.
+    std::this_thread::sleep_for(50ms);
+    EXPECT_EQ(count.load(), 1);
+}
+
+TEST(RunLoopTest, OneShotTimerAutoRemoved)
+{
+    RunLoop loop;
+    loop.init("AutoRemove");
+
+    std::atomic<bool> fired{false};
+    auto id = loop.addTimer(10, false, [&] { fired.store(true); });
+
+    RunLoopGuard guard(loop);
+
+    for (int i = 0; i < 200 && !fired.load(); ++i)
+        std::this_thread::sleep_for(5ms);
+
+    EXPECT_TRUE(fired.load());
+
+    std::this_thread::sleep_for(20ms);
+    EXPECT_NO_THROW(loop.removeTimer(id));
+}
+
+TEST(RunLoopTest, TimerHandlerCanAddNewTimer)
+{
+    RunLoop loop;
+    loop.init("TimerAddsTimer");
+
+    std::atomic<bool> innerFired{false};
+
+    loop.addTimer(10, false, [&] {
+        loop.addTimer(10, false, [&] {
+            innerFired.store(true);
+        });
+    });
+
+    RunLoopGuard guard(loop);
+
+    for (int i = 0; i < 400 && !innerFired.load(); ++i)
+        std::this_thread::sleep_for(5ms);
+
+    EXPECT_TRUE(innerFired.load());
+}
+
+TEST(RunLoopTest, TimerIdMonotonicallyIncreases)
+{
+    RunLoop loop;
+    loop.init("MonoId");
+
+    constexpr int N = 10;
+    std::vector<RunLoop::TimerId> ids;
+    ids.reserve(N);
+
+    for (int i = 0; i < N; ++i)
+        ids.push_back(loop.addTimer(100000, false, [] {}));
+
+    for (int i = 1; i < N; ++i)
+        EXPECT_GT(ids[i], ids[i - 1]) << "TimerId must be strictly increasing";
+
+    for (auto id : ids)
+        loop.removeTimer(id);
+}
+
+TEST(RunLoopTest, ZeroIntervalTimerFiresQuickly)
+{
+    RunLoop loop;
+    loop.init("QuickTimer");
+
+    std::atomic<bool> fired{false};
+    loop.addTimer(1, false, [&] { fired.store(true); });
+
+    RunLoopGuard guard(loop);
+
+    for (int i = 0; i < 200 && !fired.load(); ++i)
+        std::this_thread::sleep_for(5ms);
+
+    EXPECT_TRUE(fired.load());
+}
+
+// ── Category 3: Callable Contract Tests (all platforms) ──────────────
+
+TEST(RunLoopTest, PostFromLoopThread)
+{
+    RunLoop loop;
+    loop.init("PostInside");
+
+    std::atomic<bool> innerDone{false};
+
+    loop.executeOnRunLoop([&] {
+        loop.executeOnRunLoop([&] {
+            innerDone.store(true);
+        });
+    });
+
+    RunLoopGuard guard(loop);
+
+    for (int i = 0; i < 200 && !innerDone.load(); ++i)
+        std::this_thread::sleep_for(5ms);
+
+    EXPECT_TRUE(innerDone.load());
+}
+
+TEST(RunLoopTest, PostAfterStopQueuesForRestart)
+{
+    RunLoop loop;
+    loop.init("PostRestart");
+
+    // First run/stop cycle.
+    {
+        RunLoopGuard guard(loop);
+        std::this_thread::sleep_for(10ms);
+    }
+
+    // Post after stop.
+    std::atomic<bool> executed{false};
+    loop.executeOnRunLoop([&] { executed.store(true); });
+
+    EXPECT_FALSE(executed.load());
+
+    // Second run should deliver the queued callable.
+    {
+        std::thread t([&] { loop.run(); });
+        for (int i = 0; i < 200 && !executed.load(); ++i)
+            std::this_thread::sleep_for(5ms);
+        loop.stop();
+        t.join();
+    }
+
+    EXPECT_TRUE(executed.load());
+}
+
+TEST(RunLoopTest, PostPreservesOrderUnderLoad)
+{
+    RunLoop loop;
+    loop.init("OrderLoad");
+
+    constexpr int N = 1000;
+    std::vector<int> order;
+    order.reserve(N);
+    std::mutex mu;
+    std::atomic<int> count{0};
+
+    RunLoopGuard guard(loop);
+    std::this_thread::sleep_for(10ms);
+
+    for (int i = 0; i < N; ++i)
+    {
+        loop.executeOnRunLoop([&, i] {
+            std::lock_guard<std::mutex> lock(mu);
+            order.push_back(i);
+            count.fetch_add(1);
+        });
+    }
+
+    for (int i = 0; i < 400 && count.load() < N; ++i)
+        std::this_thread::sleep_for(5ms);
+
+    EXPECT_EQ(count.load(), N);
+    std::lock_guard<std::mutex> lock(mu);
+    for (int i = 0; i < N; ++i)
+        EXPECT_EQ(order[i], i) << "FIFO violated at index " << i;
+}
+
+TEST(RunLoopTest, PostFromMultipleThreadsAllDelivered)
+{
+    RunLoop loop;
+    loop.init("MultiThreadPost");
+
+    constexpr int NUM_THREADS = 10;
+    constexpr int POSTS_PER_THREAD = 100;
+    std::atomic<int> count{0};
+
+    RunLoopGuard guard(loop);
+    std::this_thread::sleep_for(10ms);
+
+    std::vector<std::thread> threads;
+    for (int t = 0; t < NUM_THREADS; ++t)
+    {
+        threads.emplace_back([&] {
+            for (int i = 0; i < POSTS_PER_THREAD; ++i)
+                loop.executeOnRunLoop([&] { count.fetch_add(1); });
+        });
+    }
+
+    for (auto &th : threads)
+        th.join();
+
+    for (int i = 0; i < 400 && count.load() < NUM_THREADS * POSTS_PER_THREAD; ++i)
+        std::this_thread::sleep_for(5ms);
+
+    EXPECT_EQ(count.load(), NUM_THREADS * POSTS_PER_THREAD);
+}
+
+// ── Category 4: Re-entrant Safety ────────────────────────────────────
+
+TEST(RunLoopTest, TimerRemovesSelfFromHandler)
+{
+    RunLoop loop;
+    loop.init("SelfRmTimer");
+
+    std::atomic<int> count{0};
+    RunLoop::TimerId timerId = 0;
+
+    timerId = loop.addTimer(10, true, [&] {
+        count.fetch_add(1);
+        loop.removeTimer(timerId);
+    });
+
+    RunLoopGuard guard(loop);
+
+    for (int i = 0; i < 200 && count.load() < 1; ++i)
+        std::this_thread::sleep_for(5ms);
+
+    EXPECT_EQ(count.load(), 1);
+
+    std::this_thread::sleep_for(60ms);
+    EXPECT_EQ(count.load(), 1);
+}
+
+TEST(RunLoopTest, TimerAddsSourceFromHandler)
+{
+#if defined(_WIN32)
+    GTEST_SKIP() << "CreatePipe handles not waitable on Win32";
+#endif
+    RunLoop loop;
+    loop.init("TmrAddsSrc");
+
+    auto [readFd, writeFd] = makePipe();
+
+    std::atomic<bool> sourceFired{false};
+
+    loop.addTimer(10, false, [&] {
+        loop.addSource(readFd, [&] {
+            drainPipe(readFd);
+            sourceFired.store(true);
+        });
+        writeByte(writeFd);
+    });
+
+    RunLoopGuard guard(loop);
+
+    for (int i = 0; i < 400 && !sourceFired.load(); ++i)
+        std::this_thread::sleep_for(5ms);
+
+    EXPECT_TRUE(sourceFired.load());
+
+    loop.removeSource(readFd);
+    closePipe(readFd, writeFd);
+}
+
+TEST(RunLoopTest, CallableAddsTimer)
+{
+    RunLoop loop;
+    loop.init("PostAddsTmr");
+
+    std::atomic<bool> timerFired{false};
+
+    RunLoopGuard guard(loop);
+    std::this_thread::sleep_for(10ms);
+
+    std::thread poster([&] {
+        loop.executeOnRunLoop([&] {
+            loop.addTimer(10, false, [&] {
+                timerFired.store(true);
+            });
+        });
+    });
+    poster.join();
+
+    for (int i = 0; i < 400 && !timerFired.load(); ++i)
+        std::this_thread::sleep_for(5ms);
+
+    EXPECT_TRUE(timerFired.load());
+}
+
+// ── Category 5: Stress Tests ─────────────────────────────────────────
+
+TEST(RunLoopTest, StressPostFromManyThreads)
+{
+    RunLoop loop;
+    loop.init("StressPosts");
+
+    constexpr int NUM_THREADS = 20;
+    constexpr int POSTS_PER_THREAD = 500;
+    std::atomic<int> count{0};
+
+    RunLoopGuard guard(loop);
+    std::this_thread::sleep_for(10ms);
+
+    std::vector<std::thread> threads;
+    for (int t = 0; t < NUM_THREADS; ++t)
+    {
+        threads.emplace_back([&] {
+            for (int i = 0; i < POSTS_PER_THREAD; ++i)
+                loop.executeOnRunLoop([&] { count.fetch_add(1); });
+        });
+    }
+
+    for (auto &th : threads)
+        th.join();
+
+    for (int i = 0; i < 600 && count.load() < NUM_THREADS * POSTS_PER_THREAD; ++i)
+        std::this_thread::sleep_for(10ms);
+
+    EXPECT_EQ(count.load(), NUM_THREADS * POSTS_PER_THREAD);
+}
+
+TEST(RunLoopTest, StressTimerChurn)
+{
+    RunLoop loop;
+    loop.init("StressChurn");
+
+    RunLoopGuard guard(loop);
+    std::this_thread::sleep_for(10ms);
+
+    constexpr int N = 50;
+    std::atomic<int> fireCount{0};
+
+    std::thread churner([&] {
+        for (int i = 0; i < N; ++i)
+        {
+            auto id = loop.addTimer(5, false, [&] { fireCount.fetch_add(1); });
+            if (i % 2 == 0)
+                loop.removeTimer(id);
+        }
+    });
+    churner.join();
+
+    std::this_thread::sleep_for(200ms);
+
+    EXPECT_GE(fireCount.load(), 1);
+    EXPECT_LE(fireCount.load(), N);
+}
+
+TEST(RunLoopTest, StressStartStop)
+{
+    RunLoop loop;
+    loop.init("StressStop");
+
+    constexpr int CYCLES = 10;
+
+    for (int i = 0; i < CYCLES; ++i)
+    {
+        std::thread t([&] { loop.run(); });
+        for (int j = 0; j < 200 && !loop.isRunning(); ++j)
+            std::this_thread::sleep_for(1ms);
+        loop.stop();
+        t.join();
+        EXPECT_FALSE(loop.isRunning()) << "Cycle " << i;
+    }
+}
+
+// ── Category 6: Source Tests (pipe-gated, skip on Win32) ─────────────
+
+TEST(RunLoopTest, SourceDoesNotFireAfterRemove)
+{
+#if defined(_WIN32)
+    GTEST_SKIP() << "CreatePipe handles not waitable on Win32";
+#endif
+    RunLoop loop;
+    loop.init("NoFireRm");
+
+    auto [readFd, writeFd] = makePipe();
+
+    std::atomic<int> count{0};
+    loop.addSource(readFd, [&] {
+        drainPipe(readFd);
+        count.fetch_add(1);
+    });
+
+    RunLoopGuard guard(loop);
+    std::this_thread::sleep_for(10ms);
+
+    loop.removeSource(readFd);
+    std::this_thread::sleep_for(10ms);
+
+    writeByte(writeFd);
+    std::this_thread::sleep_for(50ms);
+
+    EXPECT_EQ(count.load(), 0);
+
+    closePipe(readFd, writeFd);
+}
+
+TEST(RunLoopTest, AddSourceFromHandler)
+{
+#if defined(_WIN32)
+    GTEST_SKIP() << "CreatePipe handles not waitable on Win32";
+#endif
+    RunLoop loop;
+    loop.init("SrcAddsSrc");
+
+    auto [readFd1, writeFd1] = makePipe();
+    auto [readFd2, writeFd2] = makePipe();
+
+    std::atomic<bool> secondFired{false};
+
+    loop.addSource(readFd1, [&] {
+        drainPipe(readFd1);
+        loop.addSource(readFd2, [&] {
+            drainPipe(readFd2);
+            secondFired.store(true);
+        });
+        writeByte(writeFd2);
+    });
+
+    RunLoopGuard guard(loop);
+    std::this_thread::sleep_for(10ms);
+
+    writeByte(writeFd1);
+
+    for (int i = 0; i < 400 && !secondFired.load(); ++i)
+        std::this_thread::sleep_for(5ms);
+
+    EXPECT_TRUE(secondFired.load());
+
+    loop.removeSource(readFd1);
+    loop.removeSource(readFd2);
+    closePipe(readFd1, writeFd1);
+    closePipe(readFd2, writeFd2);
+}
+
+TEST(RunLoopTest, MultipleSourcesFairness)
+{
+#if defined(_WIN32)
+    GTEST_SKIP() << "CreatePipe handles not waitable on Win32";
+#endif
+    RunLoop loop;
+    loop.init("Fairness");
+
+    constexpr int N = 5;
+    Handle readFds[N], writeFds[N];
+    std::atomic<int> counts[N];
+
+    for (int i = 0; i < N; ++i)
+    {
+        auto [r, w] = makePipe();
+        readFds[i] = r;
+        writeFds[i] = w;
+        counts[i].store(0);
+    }
+
+    for (int i = 0; i < N; ++i)
+    {
+        Handle rfd = readFds[i];
+        loop.addSource(rfd, [&counts, i, rfd] {
+            drainPipe(rfd);
+            counts[i].fetch_add(1);
+        });
+    }
+
+    RunLoopGuard guard(loop);
+    std::this_thread::sleep_for(10ms);
+
+    for (int i = 0; i < N; ++i)
+        writeByte(writeFds[i]);
+
+    for (int retries = 0; retries < 400; ++retries)
+    {
+        bool allFired = true;
+        for (int i = 0; i < N; ++i)
+        {
+            if (counts[i].load() < 1)
+            {
+                allFired = false;
+                break;
+            }
+        }
+        if (allFired) break;
+        std::this_thread::sleep_for(5ms);
+    }
+
+    for (int i = 0; i < N; ++i)
+        EXPECT_GE(counts[i].load(), 1) << "Source " << i << " never fired";
+
+    for (int i = 0; i < N; ++i)
+    {
+        loop.removeSource(readFds[i]);
+        closePipe(readFds[i], writeFds[i]);
+    }
+}
+
+TEST(RunLoopTest, DoubleRemoveSourceIsNoOp)
+{
+#if defined(_WIN32)
+    GTEST_SKIP() << "CreatePipe handles not waitable on Win32";
+#endif
+    RunLoop loop;
+    loop.init("DblRmSrc");
+
+    auto [readFd, writeFd] = makePipe();
+
+    loop.addSource(readFd, [&] { drainPipe(readFd); });
+
+    RunLoopGuard guard(loop);
+    std::this_thread::sleep_for(10ms);
+
+    loop.removeSource(readFd);
+    EXPECT_NO_THROW(loop.removeSource(readFd));
+
+    closePipe(readFd, writeFd);
+}
