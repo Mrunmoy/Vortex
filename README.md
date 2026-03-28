@@ -82,15 +82,8 @@ Types: `NativeHandle` is `int` on Unix, `void*` on Win32. `TimerId` is `uint64_t
 |----------|---------|-----------|-------|
 | Linux | `backend_epoll.cpp` | `epoll` + `timerfd` | Preferred backend. |
 | macOS | `backend_kqueue.cpp` | `kqueue` + `EVFILT_TIMER` | Native kernel event queue. |
-| Windows (IOCP) | `backend_win32_iocp.cpp` | `IOCP` + `RegisterWaitForSingleObject` + threadpool timers | **Default.** No handle limit. Fair dispatch. |
-| Windows (WFMO) | `backend_win32.cpp` | `WaitForMultipleObjects` + `CreateWaitableTimer` | Legacy. Combined 63-handle limit for sources and timers. |
+| Windows | `backend_win32_iocp.cpp` | `IOCP` + `RegisterWaitForSingleObject` + threadpool timers | No handle limit. Fair dispatch. |
 | Stub | `backend_stub.cpp` | Polling fallback | For porting to new platforms. |
-
-Select the Windows backend at CMake configure time:
-```bash
-cmake -B build -DVORTEX_BACKEND=win32_iocp   # IOCP (default on Windows)
-cmake -B build -DVORTEX_BACKEND=win32         # Legacy WFMO
-```
 
 ## How It Works
 
@@ -162,8 +155,7 @@ src/
   CApi.cpp                     C API wrapper
   backend_epoll.cpp            Linux (epoll + timerfd)
   backend_kqueue.cpp           macOS (kqueue)
-  backend_win32_iocp.cpp       Windows (IOCP — default)
-  backend_win32.cpp            Windows (WFMO — legacy)
+  backend_win32_iocp.cpp       Windows (IOCP)
   backend_stub.cpp             Polling fallback
 test/                          Google Test suite (86 tests)
 example/                       Usage examples
