@@ -38,6 +38,10 @@ function(vortex_configure_target target_name)
     )
     target_compile_features(${target_name} PUBLIC cxx_std_17)
 
+    if(_backend STREQUAL "win32_iocp")
+        target_compile_definitions(${target_name} PUBLIC VORTEX_BACKEND_IOCP=1)
+    endif()
+
     if(NOT _backend STREQUAL "win32" AND NOT _backend STREQUAL "win32_iocp")
         find_package(Threads REQUIRED)
         target_link_libraries(${target_name} PRIVATE Threads::Threads)

@@ -437,8 +437,8 @@ TEST(CApiTest, AddSourceWithErrorCallback)
 
 TEST(CApiTest, AddTimerRejectsWhenSlotsFull)
 {
-#if !defined(_WIN32)
-    GTEST_SKIP() << "WFMO slot budget is Win32-specific";
+#if !defined(_WIN32) || defined(VORTEX_BACKEND_IOCP)
+    GTEST_SKIP() << "WFMO slot budget is Win32-WFMO-specific";
 #else
     VortexGuard guard;
     ASSERT_EQ(vortex_init(guard.loop, "CTimerSlots"), VORTEX_SUCCESS);
